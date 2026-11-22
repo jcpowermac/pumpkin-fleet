@@ -1,0 +1,91 @@
+# FCOS → uCore ignition template. envsubst (pinned vars only) → butane → ignition.
+# Variables: CORE_SSH_PUB_KEY SPIKE_HOSTNAME SPIKE_IP4 SPIKE_GW UCORE_IMAGE UCORE_TAG
+variant: fcos
+version: 1.5.0
+
+passwd:
+  users:
+    - name: core
+      groups:
+        - wheel
+        - systemd-journal
+      ssh_authorized_keys:
+        - ${CORE_SSH_PUB_KEY}
+
+systemd:
+  units:
+    # Static IP before the rebase pulls from ghcr.io (failure mode: no egress).
+    - name: fleet-static-ip.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=Fleet static IP (early)
+        DefaultDependencies=no
+        After=systemd-udevd.service NetworkManager.service
+        Before=network-online.target
+        Wants=network-online.target
+
+        [Service]
+        Type=oneshot
+        RemainAfterExit=yes
+        ExecStartPre=-/usr/bin/nmcli connection delete fleet-static
+        ExecStart=/bin/sh -c 'IFACE=$(/usr/bin/nmcli -t -f DEVICE device | grep -vE "^(lo|veth)" | head -1) && /usr/bin/nmcli connection add type ethernet con-name fleet-static ifname "$IFACE" ipv4.method manual ipv4.addresses "${SPIKE_IP4}" ipv4.gateway "${SPIKE_GW}" ipv4.dns "${SPIKE_GW}" ipv6.method disabled && /usr/bin/nmcli connection up fleet-static'
+
+        [Install]
+        WantedBy=multi-user.target
+
+    # uCore: two-step rebase (unsigned → signed) then reboot — pattern from
+    # ~/Development/homelab/freeipa (proven on this PVE host).
+    - name: ucore-unsigned-autorebase.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=uCore autorebase to unsigned OCI and reboot
+        ConditionPathExists=!/etc/ucore-autorebase/unverified
+        ConditionPathExists=!/etc/ucore-autorebase/signed
+        After=network-online.target
+        Wants=network-online.target
+
+        [Service]
+        Type=oneshot
+        StandardOutput=journal+console
+        ExecStart=/usr/bin/rpm-ostree rebase --bypass-driver ostree-unverified-registry:ghcr.io/ublue-os/${UCORE_IMAGE}:${UCORE_TAG}
+        ExecStart=/usr/bin/touch /etc/ucore-autorebase/unverified
+        ExecStart=/usr/bin/systemctl disable ucore-unsigned-autorebase.service
+        ExecStart=/usr/bin/systemctl reboot
+
+        [Install]
+        WantedBy=multi-user.target
+
+    - name: ucore-signed-autorebase.service
+      enabled: true
+      contents: |
+        [Unit]
+        Description=uCore autorebase to signed OCI and reboot
+        ConditionPathExists=/etc/ucore-autorebase/unverified
+        ConditionPathExists=!/etc/ucore-autorebase/signed
+        After=network-online.target
+        Wants=network-online.target
+
+        [Service]
+        Type=oneshot
+        StandardOutput=journal+console
+        ExecStart=/usr/bin/rpm-ostree rebase --bypass-driver ostree-image-signed:docker://ghcr.io/ublue-os/${UCORE_IMAGE}:${UCORE_TAG}
+        ExecStart=/usr/bin/touch /etc/ucore-autorebase/signed
+        ExecStart=/usr/bin/systemctl disable ucore-signed-autorebase.service
+        ExecStart=/usr/bin/systemctl reboot
+
+        [Install]
+        WantedBy=multi-user.target
+
+storage:
+  directories:
+    - path: /etc/ucore-autorebase
+      mode: 0755
+
+  files:
+    - path: /etc/hostname
+      mode: 0644
+      overwrite: true
+      contents:
+        inline: ${SPIKE_HOSTNAME}
