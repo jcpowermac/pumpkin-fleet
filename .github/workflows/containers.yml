@@ -1,0 +1,87 @@
+name: containers
+
+# Builds the four server images on GitHub's runners and pushes them to ghcr.io.
+# The uCore VMs never need a build toolchain or a source checkout — they pull
+# ghcr.io/<owner>/<repo>/<image>:<version> and nothing else.
+#
+# Versions and sha256 pins live in containers/images.json (single source of truth),
+# which this workflow reads to build the matrix. To bump a server: edit that file,
+# open a PR, merge. The version tag changes with it, so the deploy is a one-line
+# change in configs/pins.env.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'containers/**'
+      - '.github/workflows/containers.yml'
+  pull_request:
+    paths:
+      - 'containers/**'
+      - '.github/workflows/containers.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      images: ${{ steps.read.outputs.images }}
+      prefix: ${{ steps.prefix.outputs.prefix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: read
+        run: echo "images=$(jq -c . containers/images.json)" >> "$GITHUB_OUTPUT"
+
+      # Docker requires a lowercase repository name; GitHub owners may not be.
+      - id: prefix
+        run: echo "prefix=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.matrix.outputs.images) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # images.json stores args as an object; docker/build-push-action wants KEY=VALUE lines.
+      - id: args
+        env:
+          ARGS: ${{ toJSON(matrix.image.args) }}
+        run: |
+          {
+            echo 'args<<__ARGS__'
+            echo "$ARGS" | jq -r 'to_entries[] | "\(.key)=\(.value)"'
+            echo '__ARGS__'
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: containers/${{ matrix.image.name }}
+          build-args: ${{ steps.args.outputs.args }}
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          # No `latest` tag on purpose: deploys pin an exact version, so an image
+          # can never change under a running system.
+          tags: ${{ needs.matrix.outputs.prefix }}/${{ matrix.image.name }}:${{ matrix.image.version }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ matrix.image.version }}
+            org.opencontainers.image.revision=${{ github.sha }}

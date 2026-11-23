@@ -1,0 +1,36 @@
+[
+  {
+    "name": "pumpkin",
+    "version": "0.2.2-26.3-26.60",
+    "args": {
+      "PUMPKIN_RELEASE": "0.2.2%2B26.3-26.60",
+      "PUMPKIN_SHA256": "3755df414cdece664223388a93421c5c674682f5b9264387416b8a9074cd8d59",
+      "PATCHBUKKIT_VERSION": "0.2.2",
+      "PATCHBUKKIT_SHA256": "d4db46ed76d5f8c2306b225343f17ee60dc140ffb2fd412292d098bb8e9aacdf"
+    }
+  },
+  {
+    "name": "papermc",
+    "version": "26.3-258",
+    "args": {
+      "PAPER_VERSION": "26.3-258",
+      "PAPER_SHA256": "c5df5fb9f6155e48380c67c6e2b2dc2581b7db1a4b665d2c3818057b7efb6692"
+    }
+  },
+  {
+    "name": "neoforge",
+    "version": "26.3.0.115",
+    "args": {
+      "NEOFORGE_VERSION": "26.3.0.115",
+      "NEOFORGE_SHA256": "e451494c07ef7ba090f17e3c5debdc318237db29304a40ce10f7433284db6a2a"
+    }
+  },
+  {
+    "name": "velocity",
+    "version": "4.3.1-45",
+    "args": {
+      "VELOCITY_VERSION": "4.3.1-45",
+      "VELOCITY_SHA256": "0844bcabdcdb4f5b875906fd4c3365bc1bb76918e42bc595ed88ad195258dd75"
+    }
+  }
+]
