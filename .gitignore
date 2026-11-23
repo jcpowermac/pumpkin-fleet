@@ -3,3 +3,8 @@ __pycache__/
 *.pyc
 .venv/
 .superpowers/
+
+# Never commit real secrets. This repo's history is pushed; a committed
+# password hash is a committed password. Identity is SSH-key only.
+configs/secret.env
+*.secret
