@@ -48,6 +48,10 @@ jobs:
           recipe: ${{ matrix.recipe }}
           registry_token: ${{ github.token }}
           pr_event_number: ${{ github.event.number }}
-          # No cosign_private_key yet: images are unsigned until a SIGNING_SECRET
-          # secret exists and `- type: signing` is added to the recipe.
           maximize_build_space: true
+          # Images are unsigned for now. BlueBuild signs by default and hard-fails
+          # without a keypair ("Unable to find private/public key pair"). To turn
+          # signing on: `cosign generate-key-pair`, commit cosign.pub, set a
+          # SIGNING_SECRET repo secret, add `- type: signing` to recipes/fleet.yml,
+          # pass cosign_private_key below and drop this --no-sign.
+          build_opts: --no-sign
