@@ -18,20 +18,26 @@ Base images (Temurin 25 JRE, chosen per libc requirement):
 
 | image | base | compressed | why that libc |
 |---|---|---|---|
-| `pumpkin` | `25-jre-noble` (glibc) | 110 MB | **mandatory** — the Rust binary is `interpreter /lib64/ld-linux-x86-64.so.2`; it cannot run on musl |
+| `pumpkin` | `25-jre-ubi10-minimal` (glibc) | 136 MB | **mandatory** — the Rust binary is `interpreter /lib64/ld-linux-x86-64.so.2`; it cannot run on musl |
+| `neoforge` | `25-jre-ubi10-minimal` (glibc) | 136 MB | NeoForge pulls netty's native epoll (`linux-x86_64`, glibc-built) and mods can ship glibc natives |
 | `papermc` | `25-jre-alpine` (musl) | 78 MB | pure JVM, no native surface |
 | `velocity` | `25-jre-alpine` (musl) | 78 MB | pure JVM, no native surface |
-| `neoforge` | `25-jre-noble` (glibc) | 110 MB | NeoForge pulls netty's native epoll (`linux-x86_64`, glibc-built) and mods can ship glibc natives |
 
-Notes on the alternatives, since they come up:
+Base selection, since it comes up every time:
 
-- **Temurin has no Debian image.** Published families are Ubuntu (`noble`/`jammy`), Alpine,
-  and UBI. A `debian:bookworm-slim` base would mean installing a JRE yourself from
-  Adoptium's tarball or apt repo — a second set of pins for ~35 MB, since the JRE is the
-  bulk of the image either way.
-- **`25-jre-ubi10-minimal` is 136 MB**, *larger* than noble, so it is not a size win.
-- Alpine saves ~32 MB compressed (~90 MB on disk) per image. Worth taking where it's free,
-  not worth a musl port of a modded server.
+- **Temurin has no Debian image.** Published families are Ubuntu (`noble`/`jammy`, 110 MB),
+  Alpine (78 MB) and UBI (136 MB). A `debian:bookworm-slim` base would mean installing the
+  JRE yourself from Adoptium's tarball or apt repo — a second set of pins for ~35 MB,
+  because the JRE is the bulk of the image either way.
+- **UBI 10 minimal is the glibc fallback**, chosen over `noble` for house consistency
+  (RHEL estate), not for size — it is 26 MB *larger* than noble. Say the word if you'd
+  rather the glibc images were `noble`.
+- **Alpine is used only where nothing native is loaded.** musl genuinely works for a pure
+  JVM workload; it does not work for the Pumpkin binary at all, and it puts a modded
+  server on musl for a 58 MB saving.
+- UBI minimal specifics: it has no `util-linux`, so **`/usr/sbin/nologin` does not exist** —
+  the service account uses `-s /bin/false`. It also has **no `tini`** (not in the UBI
+  repos, no `catatonit` either), so `pumpkin` relies on the runtime's `--init`.
 - Base images are pinned by tag, not digest, so a rebuild can pick up a new base. Pin by
   `@sha256:` if that ever matters.
 
@@ -83,7 +89,8 @@ podman run -d --name lobby --init \
 
 Notes:
 
-- `--init` matters for `pumpkin` (PatchBukkit forks a JVM child that must be reaped).
+- `--init` is **required** for `pumpkin`: PatchBukkit forks a child JVM and the image has
+  no `tini` (UBI has no such package), so without `--init` children are never reaped.
 - `--stop-timeout 60` gives the server time to save and shut down cleanly on `SIGTERM`.
 - `EULA=true` is required for `papermc` and `neoforge`; without it the container has no
   `eula.txt` and Paper refuses to start. `pumpkin` and `velocity` need no EULA.
