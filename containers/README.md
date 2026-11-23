@@ -14,7 +14,26 @@ reads it to build its matrix; edit it and push to bump anything.
 | `neoforge` | `26.3.0.115` | installer, resolved at build | modded server |
 | `velocity` | `4.3.1-45` | `velocity-4.3.1-45.jar` | proxy; Velocity 4 requires Java 25 |
 
-Base image for all four: `eclipse-temurin:25-jre-noble`.
+Base images (Temurin 25 JRE, chosen per libc requirement):
+
+| image | base | compressed | why that libc |
+|---|---|---|---|
+| `pumpkin` | `25-jre-noble` (glibc) | 110 MB | **mandatory** — the Rust binary is `interpreter /lib64/ld-linux-x86-64.so.2`; it cannot run on musl |
+| `papermc` | `25-jre-alpine` (musl) | 78 MB | pure JVM, no native surface |
+| `velocity` | `25-jre-alpine` (musl) | 78 MB | pure JVM, no native surface |
+| `neoforge` | `25-jre-noble` (glibc) | 110 MB | NeoForge pulls netty's native epoll (`linux-x86_64`, glibc-built) and mods can ship glibc natives |
+
+Notes on the alternatives, since they come up:
+
+- **Temurin has no Debian image.** Published families are Ubuntu (`noble`/`jammy`), Alpine,
+  and UBI. A `debian:bookworm-slim` base would mean installing a JRE yourself from
+  Adoptium's tarball or apt repo — a second set of pins for ~35 MB, since the JRE is the
+  bulk of the image either way.
+- **`25-jre-ubi10-minimal` is 136 MB**, *larger* than noble, so it is not a size win.
+- Alpine saves ~32 MB compressed (~90 MB on disk) per image. Worth taking where it's free,
+  not worth a musl port of a modded server.
+- Base images are pinned by tag, not digest, so a rebuild can pick up a new base. Pin by
+  `@sha256:` if that ever matters.
 
 ## Design rules these images follow
 
