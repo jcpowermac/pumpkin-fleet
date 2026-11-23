@@ -21,15 +21,12 @@ systemd:
     # drop to emergency shell. Mask both (vSphere flow did not need this).
     - name: coreos-ignition-unique-boot.service
       mask: true
-    # uCore ships Cockpit as RPMs (bridge, files, networkmanager, podman, storaged)
-    # but runs cockpit-ws as a Podman container; the RPM is deliberately absent.
-    - name: cockpit.service
-      enabled: true
+    # cockpit.service is a uCore unit — it does not exist yet on stock FCOS, so it cannot be
+    # enabled from here (Ignition would silently no-op). fleet-provision.sh enables it in its
+    # post-rebase branch instead.
     # (coreos-gpt-setup stays enabled: it grows the root partition to the full disk)
     # One boot does everything: persistent static IP (NM connection lands in the
     # deployment's /var), unsigned + signed uCore rebase, reboot into uCore.
-    - name: qemu-guest-agent.service
-      enabled: true
     - name: fleet-provision.service
       enabled: true
       contents: |
@@ -68,9 +65,25 @@ storage:
           for i in $(seq 1 24); do /usr/bin/nmcli connection up fleet-static 2>/dev/null && ok=1 && break; sleep 5; done
           [ -n "$ok" ] || { echo "fleet-provision: static IP failed"; exit 1; }
           echo "fleet-provision: $(/usr/bin/ip -4 addr show $IFACE | grep inet)"
-          # NB: ghcr.io answers HTTP 405 to HEAD on /, so `curl -f` would always fail.
+
+          # Idempotent guard. Without it this unit rebases + reboots on every boot, forever:
+          # after the first run uCore is the booted deployment, the rebase becomes a no-op, and
+          # the unconditional reboot turns the node into a reboot loop with no network.
+          if /usr/bin/rpm-ostree status --booted 2>/dev/null | grep -q 'ublue-os/ucore'; then
+            echo "fleet-provision: already running uCore — network set, nothing else to do"
+            # uCore-only services cannot be enabled before the rebase; do it here.
+            # cockpit-ws is a Podman container in uCore (the RPM is deliberately absent),
+            # and cockpit-files gives the ops class its file manager.
+            /usr/bin/systemctl enable --now cockpit.service 2>/dev/null || true
+            /usr/bin/systemctl enable --now qemu-guest-agent.service 2>/dev/null || true
+            exit 0
+          fi
+
+          # NB: no `curl -f` here. ghcr.io answers 405 to HEAD on / and 401 on /v2/, so any
+          # status check that fails on 4xx reports "no egress" on a perfectly good network.
+          # Reachability only: curl exits non-zero on DNS/TLS/connect failure, which is what we want.
           up=""
-          for i in $(seq 1 36); do /usr/bin/curl -fsS --max-time 10 https://ghcr.io/v2/ >/dev/null 2>&1 && up=1 && break; sleep 10; done
+          for i in $(seq 1 36); do /usr/bin/curl -sS --max-time 10 -o /dev/null https://ghcr.io/v2/ >/dev/null 2>&1 && up=1 && break; sleep 10; done
           [ -n "$up" ] || { echo "fleet-provision: no ghcr.io egress"; exit 1; }
           echo "fleet-provision: rebasing to uCore (pull ~10min)"
           # --bypass-driver: updates are owned by Zincati on stock FCOS
