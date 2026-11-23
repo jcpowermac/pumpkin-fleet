@@ -33,11 +33,18 @@ fi
 COUNT="$($SSH 'rpm-ostree status | grep -cE "^[● ] ostree-"')"
 (( COUNT >= 2 )) && ok "${COUNT} deployments present (rollback available)" || bad "rollback target missing (${COUNT} deployment)"
 
-# 5. Cockpit is NOT in the uCore base image — carried as a known gap, layered separately.
-if $SSH 'rpm -q cockpit' >/dev/null 2>&1; then
-  ok "cockpit installed"
+# 5. Cockpit: uCore ships the RPMs but runs cockpit-ws as a Podman container (cockpit.service).
+#    Checking `rpm -q cockpit` is wrong — that package is absent by design.
+if $SSH 'rpm -q cockpit-bridge >/dev/null' 2>/dev/null; then
+  ok "cockpit RPMs present ($($SSH 'rpm -q cockpit-files' 2>/dev/null))"
 else
-  echo "NOTE: cockpit not installed (not in the uCore base image; layer it with rpm-ostree if needed)"
+  bad "cockpit-bridge missing"
+fi
+if $SSH 'systemctl is-active --quiet cockpit.service' 2>/dev/null; then
+  CODE="$(curl -ks -o /dev/null -w '%{http_code}' --max-time 10 "https://${IP_SPIKE}:9090/" || echo 000)"
+  [[ "$CODE" == 200 ]] && ok "cockpit :9090 container serving (HTTP $CODE)" || bad "cockpit :9090 (HTTP $CODE)"
+else
+  bad "cockpit.service not active (Podman container not running)"
 fi
 
 if [[ "${1:-}" == "--rollback" ]]; then

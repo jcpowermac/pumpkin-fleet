@@ -21,9 +21,15 @@ systemd:
     # drop to emergency shell. Mask both (vSphere flow did not need this).
     - name: coreos-ignition-unique-boot.service
       mask: true
+    # uCore ships Cockpit as RPMs (bridge, files, networkmanager, podman, storaged)
+    # but runs cockpit-ws as a Podman container; the RPM is deliberately absent.
+    - name: cockpit.service
+      enabled: true
     # (coreos-gpt-setup stays enabled: it grows the root partition to the full disk)
     # One boot does everything: persistent static IP (NM connection lands in the
     # deployment's /var), unsigned + signed uCore rebase, reboot into uCore.
+    - name: qemu-guest-agent.service
+      enabled: true
     - name: fleet-provision.service
       enabled: true
       contents: |
