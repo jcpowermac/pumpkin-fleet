@@ -42,12 +42,20 @@ Failure modes the spec implies but no single step pins down:
 
 ### Task 1: Spike — golden uCore VM on pve3 (VMID 190)
 
+> **EXECUTED 2026-11-22 — PASS, but Steps 2–6 below are SUPERSEDED.**
+> The live-ISO path was never used. Do not follow them; the working recipe is:
+> FCOS **proxmoxve qcow2** → `qm set --scsi0 "pool:0,import-from=<qcow2>"` →
+> `--ide2 pool:cloudinit` + `--cicustom vendor=fleet:snippets/<ign>` → **SeaBIOS** (NOT OVMF).
+> Full write-up with every failure mode: `~/Development/pumpkin-fleet/docs/spike-notes.md`,
+> summarised in `docs/superpowers/notes/2026-11-21-ucore-vm-spike.md`.
+> Implemented by `~/Development/pumpkin-fleet/scripts/fleet/20-create-nodes.sh`.
+
 **Files:**
 - On pve3: `/var/lib/vz/images/fcos-stable-live.iso` (ISO storage `local`), ignition built inside the FCOS live environment
 - Local: `docs/superpowers/notes/2026-11-21-ucore-vm-spike.md` (spike results: exact ISO build, uCore tag, rebase timings, anything gnarly)
 
 **Interfaces:**
-- Produces: a **PVE template VM 190** (uCore, hostname `ucore-golden`, static `10.10.10.99`, disk on `pool`) that Task 6 clones; the pinned uCore deployment tag recorded in the spike notes.
+- Produces: **VM 190 turned into a PVE template** (uCore, hostname `ucore-golden`, static `10.10.10.99`, disk on `pool`) — but Task 6 must NOT clone it (see Task 6); it is a reference image only. Plus the pinned uCore deployment tag recorded in the spike notes.
 
 - [ ] **Step 1: Clean up the LXC spike leftovers on pve3**
 
@@ -71,10 +79,21 @@ curl -fL -o /var/lib/vz/images/fcos-stable-live.iso \
 ```
 Verify: file is ~1.5 GB and `file /var/lib/vz/images/fcos-stable-live.iso` says ISO 9660. Then, to pre-check egress for the rebase (failure mode #2), temporarily create a scratch check: boot isn't possible yet, so instead confirm from pve3 that `curl -fsSI https://ghcr.io/v2/` succeeds (host egress) and note that the VM will use the same bridge.
 
-- [ ] **Step 3: Check UEFI firmware exists (failure mode #1)**
+- [x] **Step 3: UEFI firmware (OBSOLETE — do not do this)**
 
-Run: `ls /usr/share/ovmf/OVMF*.fd 2>/dev/null || ls /usr/share/pve-kvm-img/OVMF* 2>/dev/null`
-Expected: at least one OVMF code binary. If none: `apt-get install -y q35-extra` (PVE package providing OVMF), then re-check. Record firmware path in spike notes.
+~~Check OVMF exists~~ — **wrong premise.** FCOS's proxmoxve artifact has a BIOS boot partition
+and upstream uses the SeaBIOS default. Adding `--bios ovmf` without a persistent `efidisk0` gives
+throwaway NVRAM on every boot (`WARN: no efidisk configured! Using temporary efivars disk`) and
+buys nothing. Create the VM with **no** `--bios`, no `--machine q35`, no `efidisk0`, and
+`--scsihw virtio-scsi-pci` (**not** `virtio-scsi-single`).
+
+- [ ] **Step 4: Create VM 190 (SUPERSEDED — see banner at top of Task 1)**
+
+> Superseded: do not use `--cdrom`/live ISO/`--bios ovmf`. Use the qcow2 import +
+> cloud-init cidata recipe in `~/Development/pumpkin-fleet/docs/spike-notes.md` §1.
+> Steps 4–6 are kept only as a record of the original plan.
+
+**Original text (obsolete):**
 
 - [ ] **Step 4: Create VM 190 on the ISO**
 
@@ -288,18 +307,48 @@ Verify from outside: `nc -vz <public-ip> 24587` connects (Minecraft ping optiona
 
 Sizing (fixed): 201/202/203 = 4 cores / 4 GiB; 204 = 4 cores / 6 GiB (4 GiB heap + JVM overhead). All: `pool` disk 40 GiB qcow2, virtio-net on vmbr1.
 
-- [ ] **Step 1: Clone and boot**
+- [x] **Step 1: Create and boot (DONE — do NOT clone template 190)**
+
+**Cloning template 190 is broken.** On a cloned disk FCOS's `coreos-gpt-setup` regenerates the
+root filesystem UUID and rewrites the bootloader mid-boot, so Ignition's `useradd` runs against a
+half-mounted `/sysroot` and the boot lands in the emergency shell:
+
+```
+Ignition failed: failed to create users/groups: failed to create user "core":
+  useradd: group 'adm' does not exist ... 'wheel' does not exist
+```
+
+Ignition is one-shot per system by design. Create each node by **importing the image**, which
+gives it a genuine first boot:
 
 ```bash
-for pair in "201 lobby" "202 plugins" "203 vanilla" "204 neoforge"; do
-  set -- $pair; qm clone 190 $1 --name $2 --full
-  qm set $1 --memory $([ $1 = 204 ] && echo 6144 || echo 4096)
+for pair in "201 lobby 10.10.10.54" "202 plugins 10.10.10.55" \
+            "203 vanilla 10.10.10.56" "204 neoforge 10.10.10.57"; do
+  set -- $pair
+  qm create $1 --name $2 --cores 4 --memory 4096 --cpu host \
+    --net0 virtio,bridge=vmbr1 --scsihw virtio-scsi-pci \
+    --agent enabled=1 --tablet 1 --vga serial0 --serial0 socket
+  qm set   $1 --scsi0 "pool:0,import-from=/var/coreos/images/fcos.qcow2"
+  qm resize $1 scsi0 40G
+  qm set   $1 --ide2 pool:cloudinit --boot order=scsi0
+  qm set   $1 --cicustom vendor=fleet:snippets/$2.ign --ciupgrade 0
+  qm set   $1 --ipconfig0 ip=$3/24,gw=10.10.10.1
   qm start $1
 done
 ```
-(First-boot clone gotcha: cloned FCOS/uCore VMs may need a fresh machine-id — if boot hangs, `qm mount $vmid` is not for KVM; instead boot, console in, `hostnamectl` + `rm /etc/machine.id`-style fix. Record any fix in spike notes; better: apply the fix to template 190 *before* cloning — do the machine-id scrub in template 190 as part of `qm template` in Task 1 Step 8.)
+
+Implemented in `~/Development/pumpkin-fleet/scripts/fleet/20-create-nodes.sh`. Each node's
+Ignition sets the static IP, rebases to uCore (`--bypass-driver`), and reboots (~5 min, parallel).
 
 Verify: all 4 boot to SSH (key auth, user `core`), `qm gueststatus` shows agent running.
+
+- [x] **Step 2: Per-VM hostname + static IP (DONE via Ignition, not pyinfra)**
+
+> Handled at first boot by `templates/fleet.ign.butane` (hostname file + nmcli), because
+> PVE's cloud-init `network-config` is ignored by FCOS (it names the NIC `eth0`; virtio is
+> `ens18`). No pyinfra task needed for identity.
+
+**Original text:**
 
 - [ ] **Step 2: Per-VM hostname + static IP**
 
