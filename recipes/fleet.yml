@@ -35,20 +35,17 @@ modules:
         # drop the guest agent that qm agent and the fleet's IP checks rely on.
         - qemu-guest-agent
 
-  # uCore's /etc/ssh/sshd_config has NO `Include /etc/ssh/sshd_config.d/*.conf`, so the
-  # drop-in that Cockpit's own docs tell you to write is inert. Add the Include, or the
-  # file below never gets read.
-  - type: script
-    snippets:
-      - "grep -q '^Include /etc/ssh/sshd_config.d/' /etc/ssh/sshd_config || sed -i '1i Include /etc/ssh/sshd_config.d/*.conf' /etc/ssh/sshd_config"
-
-  # Copies files/system/** into the image. Must run before initramfs.
-  - type: files
-    files:
-      - source: system
-        destination: /
-
-  - type: initramfs
+  # NOTE: no sshd drop-in and no `Include` patch here, and that is deliberate. uCore
+  # already ships /etc/ssh/sshd_config.d/90-enable-localhost-passwords.conf:
+  #
+  #   # uCore modification
+  #   # enables Cockpit web login without exposing password auth to network
+  #   Match Address 127.0.0.1,::1
+  #     PasswordAuthentication yes
+  #
+  # and its sshd_config already has `Include /etc/ssh/sshd_config.d/*.conf` (line 15).
+  # Verified with `sshd -T -C addr=127.0.0.1,user=core` -> yes, `-C addr=<vlan peer>` -> no.
+  # An earlier version of this recipe added both and was redundant.
 
   # Signing is deliberately off: it needs a SIGNING_SECRET secret and a `cosign.pub`
   # in the repo, and the nodes rebase with ostree-unverified-registry anyway (see
