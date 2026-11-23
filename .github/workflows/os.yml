@@ -1,0 +1,53 @@
+name: os
+
+# Builds the fleet OS image with BlueBuild and pushes it to ghcr.io/jcpowermac/pumpkin-os.
+# Nodes then rebase onto it instead of layering packages with rpm-ostree, which keeps the
+# base immutable and makes "what is on this machine" answerable from one recipe.
+#
+# Layout mirrors jcpowermac/os: recipes/*.yml + files/system/** , built by the BlueBuild
+# reusable action. Matches on paths so container-only changes don't rebuild the OS.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'recipes/**'
+      - 'files/**'
+      - '.github/workflows/os.yml'
+  pull_request:
+    paths:
+      - 'recipes/**'
+      - 'files/**'
+  schedule:
+    # Daily, after the ublue base images publish, so we pick up base fixes.
+    - cron: '00 06 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  bluebuild:
+    name: Build Custom Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      # Required by the action for keyless cosign attestation.
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        recipe:
+          - fleet.yml
+    steps:
+      - name: Build Custom Image
+        uses: blue-build/github-action@v1.13.0
+        with:
+          recipe: ${{ matrix.recipe }}
+          registry_token: ${{ github.token }}
+          pr_event_number: ${{ github.event.number }}
+          # No cosign_private_key yet: images are unsigned until a SIGNING_SECRET
+          # secret exists and `- type: signing` is added to the recipe.
+          maximize_build_space: true

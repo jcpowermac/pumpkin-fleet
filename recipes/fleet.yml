@@ -1,0 +1,53 @@
+---
+# yaml-language-server: $schema=https://schema.blue-build.org/recipe-v1.json
+# Image lands at ghcr.io/jcpowermac/pumpkin-os
+name: pumpkin-os
+description: uCore base for the pumpkin Minecraft fleet - host sssd so Cockpit can log in.
+
+# uCore is what the VMs already run (see docs/spike-notes.md); this only adds what
+# the fleet needs baked in rather than layered with rpm-ostree per node.
+base-image: ghcr.io/ublue-os/ucore
+image-version: stable
+
+modules:
+  # The OVN rpm %pre scriptlets `touch /var/lib/rpm-state/ovn-*`. That dir is owned by
+  # the `filesystem` rpm but ostree container roots have an empty /var, so the
+  # transaction fails without it. Same workaround as jcpowermac/os.
+  - type: script
+    snippets:
+      - "mkdir -p /var/lib/rpm-state"
+
+  - type: rpm-ostree
+    install:
+      # Cockpit's privileged container logs in by SSHing to the host, so the HOST does
+      # the authentication (see cockpit-project.org/running.html#coreos). That needs a
+      # real NSS/PAM provider on the host. uCore ships sssd-ldap but NOT the sssd
+      # daemon, so LDAP/authentik login cannot work without this.
+      - sssd
+      - sssd-ldap
+      - sssd-tools
+      # Creates the home directory on first login for LDAP users.
+      - oddjob-mkhomedir
+      # Already in uCore; listed so a base-image change cannot silently drop the
+      # guest agent the fleet relies on for qm agent / network queries.
+      - qemu-guest-agent
+
+  # uCore's /etc/ssh/sshd_config has NO `Include /etc/ssh/sshd_config.d/*.conf`, so the
+  # drop-in that Cockpit's docs tell you to write is inert. Add the Include so the
+  # overlay file below is actually read.
+  - type: script
+    snippets:
+      - "grep -q '^Include /etc/ssh/sshd_config.d/' /etc/ssh/sshd_config || sed -i '1i Include /etc/ssh/sshd_config.d/*.conf' /etc/ssh/sshd_config"
+
+  # Copies files/system/** into the image. Must run before initramfs.
+  - type: files
+    files:
+      - source: system
+        destination: /
+
+  - type: initramfs
+
+  # Signing is deliberately not enabled yet: it needs a SIGNING_SECRET repo secret and
+  # the nodes currently rebase with ostree-unverified-registry anyway (see
+  # docs/spike-notes.md). To turn it on: add the secret, add
+  # `- type: signing` here, and pass cosign_private_key in .github/workflows/os.yml.
