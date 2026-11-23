@@ -1,5 +1,8 @@
-# FCOS → uCore ignition template. envsubst (pinned vars only) → butane → ignition.
-# Variables: CORE_SSH_PUB_KEY SPIKE_HOSTNAME SPIKE_IP4 SPIKE_GW UCORE_IMAGE UCORE_TAG
+# FCOS → uCore ignition template (v3: one-shot provisioning).
+# FCOS QEMU/proxmox images only read fw_cfg while /ignition.firstboot exists on the
+# extboot partition (grub 05_ignition.cfg); coreos-ignition-firstboot-complete deletes
+# it after the first ignition. Re-arm it before reboot to re-apply this config.
+# envsubst (pinned vars) → butane → ignition.
 variant: fcos
 version: 1.5.0
 
@@ -14,76 +17,61 @@ passwd:
 
 systemd:
   units:
-    # Static IP before the rebase pulls from ghcr.io (failure mode: no egress).
-    - name: fleet-static-ip.service
+    # PVE qcow2 import makes the disk look cloned -> clone-detection services
+    # drop to emergency shell. Mask both (vSphere flow did not need this).
+    - name: coreos-ignition-unique-boot.service
+      mask: true
+    # (coreos-gpt-setup stays enabled: it grows the root partition to the full disk)
+    # One boot does everything: persistent static IP (NM connection lands in the
+    # deployment's /var), unsigned + signed uCore rebase, reboot into uCore.
+    - name: fleet-provision.service
       enabled: true
       contents: |
         [Unit]
-        Description=Fleet static IP (early)
-        DefaultDependencies=no
-        After=systemd-udevd.service NetworkManager.service
-        Before=network-online.target
-        Wants=network-online.target
-
-        [Service]
-        Type=oneshot
-        RemainAfterExit=yes
-        ExecStartPre=-/usr/bin/nmcli connection delete fleet-static
-        ExecStart=/bin/sh -c 'IFACE=$(/usr/bin/nmcli -t -f DEVICE device | grep -vE "^(lo|veth)" | head -1) && /usr/bin/nmcli connection add type ethernet con-name fleet-static ifname "$IFACE" ipv4.method manual ipv4.addresses "${SPIKE_IP4}" ipv4.gateway "${SPIKE_GW}" ipv4.dns "${SPIKE_GW}" ipv6.method disabled && /usr/bin/nmcli connection up fleet-static'
-
-        [Install]
-        WantedBy=multi-user.target
-
-    # uCore: two-step rebase (unsigned → signed) then reboot — pattern from
-    # ~/Development/homelab/freeipa (proven on this PVE host).
-    - name: ucore-unsigned-autorebase.service
-      enabled: true
-      contents: |
-        [Unit]
-        Description=uCore autorebase to unsigned OCI and reboot
-        ConditionPathExists=!/etc/ucore-autorebase/unverified
-        ConditionPathExists=!/etc/ucore-autorebase/signed
+        Description=Fleet one-shot provisioning (static IP + uCore rebase + reboot)
         After=network-online.target
         Wants=network-online.target
 
         [Service]
         Type=oneshot
         StandardOutput=journal+console
-        ExecStart=/usr/bin/rpm-ostree rebase --bypass-driver ostree-unverified-registry:ghcr.io/ublue-os/${UCORE_IMAGE}:${UCORE_TAG}
-        ExecStart=/usr/bin/touch /etc/ucore-autorebase/unverified
-        ExecStart=/usr/bin/systemctl disable ucore-unsigned-autorebase.service
-        ExecStart=/usr/bin/systemctl reboot
-
-        [Install]
-        WantedBy=multi-user.target
-
-    - name: ucore-signed-autorebase.service
-      enabled: true
-      contents: |
-        [Unit]
-        Description=uCore autorebase to signed OCI and reboot
-        ConditionPathExists=/etc/ucore-autorebase/unverified
-        ConditionPathExists=!/etc/ucore-autorebase/signed
-        After=network-online.target
-        Wants=network-online.target
-
-        [Service]
-        Type=oneshot
-        StandardOutput=journal+console
-        ExecStart=/usr/bin/rpm-ostree rebase --bypass-driver ostree-image-signed:docker://ghcr.io/ublue-os/${UCORE_IMAGE}:${UCORE_TAG}
-        ExecStart=/usr/bin/touch /etc/ucore-autorebase/signed
-        ExecStart=/usr/bin/systemctl disable ucore-signed-autorebase.service
-        ExecStart=/usr/bin/systemctl reboot
+        ExecStart=/usr/local/bin/fleet-provision.sh
 
         [Install]
         WantedBy=multi-user.target
 
 storage:
-  directories:
-    - path: /etc/ucore-autorebase
-      mode: 0755
-
   files:
+    - path: /usr/local/bin/fleet-provision.sh
+      mode: 0755
+      contents:
+        inline: |
+          #!/bin/sh
+          set -e
+          IFACE=""
+          for i in $(seq 1 12); do
+            IFACE=$(/usr/bin/nmcli -t -f DEVICE device 2>/dev/null | grep -vE "^(lo|veth)" | head -1)
+            [ -n "$IFACE" ] && break
+            sleep 5
+          done
+          [ -n "$IFACE" ] || { echo "fleet-provision: no interface found"; exit 1; }
+          echo "fleet-provision: using $IFACE"
+          /usr/bin/nmcli connection delete fleet-static 2>/dev/null || true
+          /usr/bin/nmcli connection add type ethernet con-name fleet-static ifname "$IFACE" ipv4.method manual ipv4.addresses "${SPIKE_IP4}" ipv4.gateway "${FLEET_GW}" ipv4.dns "${FLEET_GW}" ipv6.method disabled
+          ok=""
+          for i in $(seq 1 24); do /usr/bin/nmcli connection up fleet-static 2>/dev/null && ok=1 && break; sleep 5; done
+          [ -n "$ok" ] || { echo "fleet-provision: static IP failed"; exit 1; }
+          echo "fleet-provision: $(/usr/bin/ip -4 addr show $IFACE | grep inet)"
+          # NB: ghcr.io answers HTTP 405 to HEAD on /, so `curl -f` would always fail.
+          up=""
+          for i in $(seq 1 36); do /usr/bin/curl -fsS --max-time 10 https://ghcr.io/v2/ >/dev/null 2>&1 && up=1 && break; sleep 10; done
+          [ -n "$up" ] || { echo "fleet-provision: no ghcr.io egress"; exit 1; }
+          echo "fleet-provision: rebasing to uCore (pull ~10min)"
+          # --bypass-driver: updates are owned by Zincati on stock FCOS
+          /usr/bin/rpm-ostree rebase --bypass-driver ostree-unverified-registry:ghcr.io/ublue-os/${UCORE_IMAGE}:${UCORE_TAG} || exit 1
+          echo "fleet-provision: staged; rebooting into uCore"
+          /usr/bin/systemctl reboot
+
     - path: /etc/hostname
       mode: 0644
       overwrite: true

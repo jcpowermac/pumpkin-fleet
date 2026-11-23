@@ -4,7 +4,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
-source configs/pins.env
+set -a; source configs/pins.env; set +a   # export pins for envsubst child
 
 command -v butane >/dev/null || { echo "butane not found (brew install butane)" >&2; exit 1; }
 [[ -s "${CORE_SSH_PUB_KEY_FILE}" ]] || { echo "missing ${CORE_SSH_PUB_KEY_FILE}" >&2; exit 1; }
