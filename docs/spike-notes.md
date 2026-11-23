@@ -275,3 +275,82 @@ Both directions clean, both deployments retained. Add `--rollback` to the verify
 FCOS/uCore is **immutable and one-shot**. Fight that (host-side disk edits, replaying Ignition,
 cloning a booted machine) and you get emergency shells that look like hardware faults. Work with
 it (image + Ignition + import per machine) and each step is boring and repeatable.
+
+---
+
+## 14. Fleet OS image (BlueBuild)
+
+Built by `.github/workflows/os.yml` from `recipes/fleet.yml`, following
+`github.com/jcpowermac/os`. Published as **`ghcr.io/jcpowermac/pumpkin-os`**
+(tags: `latest`, `45`, `<sha>-45`, `<date>-45`), public — anonymous pull, no
+credentials on the nodes.
+
+**Why an image instead of `rpm-ostree install sssd`:** layering is per-node drift.
+One recipe is answerable from git.
+
+### What it actually adds
+
+Only what uCore is missing. Verified on `lobby` (201) after rebase:
+
+```
+sssd-2.13.2  sssd-ldap-2.13.2  sssd-tools  oddjob-mkhomedir-0.34.7  qemu-guest-agent
+```
+
+### BlueBuild specifics
+
+- **Use `type: dnf`, not `type: rpm-ostree`.** The rpm-ostree module aborts in a
+  container build: `error: This system was not booted via libostree`.
+- **BlueBuild signs by default** and hard-fails without a keypair:
+  `Unable to find private/public key pair`. Pass `build_opts: --no-sign` until a
+  `SIGNING_SECRET` + `cosign.pub` + `- type: signing` exist.
+- Keep the `mkdir -p /var/lib/rpm-state` script: rpm `%pre` scriptlets `touch` there
+  and ostree container roots have an empty `/var`.
+
+### uCore already ships the Cockpit sshd drop-in — do not add another
+
+I claimed twice that uCore lacks `Include /etc/ssh/sshd_config.d/*.conf`. Both were
+wrong: the grep ran as `core`, failed with `Permission denied`, and the empty output
+read as absence. With `sudo`:
+
+```
+/etc/ssh/sshd_config:15:            Include /etc/ssh/sshd_config.d/*.conf
+/etc/ssh/sshd_config.d/90-enable-localhost-passwords.conf:
+  # uCore modification
+  # enables Cockpit web login without exposing password auth to network
+  Match Address 127.0.0.1,::1
+    PasswordAuthentication yes
+```
+
+That is exactly what the Cockpit docs tell you to write, already present. Confirm with:
+
+```sh
+sudo sshd -T -C addr=127.0.0.1,user=core | grep -i ^passwordauthentication   # yes
+sudo sshd -T -C addr=10.10.10.1,user=core | grep -i ^passwordauthentication  # no
+```
+
+**Lesson: any `grep` on `/etc/ssh/sshd_config` or `/etc/sssd/**` must run with `sudo`,
+and a permission failure is not evidence of absence.**
+
+### Rebasing a node onto it
+
+```sh
+sudo rpm-ostree rebase --bypass-driver \
+  ostree-unverified-registry:ghcr.io/jcpowermac/pumpkin-os:latest
+sudo systemctl reboot
+```
+
+**`rpm-ostree` no-ops when the ref string is unchanged** (`error: Old and new refs are
+equal`). To pick up a new build of the same tag, rebase by digest:
+
+```sh
+ostree-unverified-registry:ghcr.io/jcpowermac/pumpkin-os@sha256:<digest>
+```
+
+### HAZARD: `fleet-provision` will revert a pumpkin-os node
+
+`templates/fleet.ign.butane`'s guard is
+`rpm-ostree status --booted | grep -q 'ublue-os/ucore'`. A node booted on
+`ghcr.io/jcpowermac/pumpkin-os` does **not** match, so the unit would rebase it back to
+uCore and reboot — a loop. Nodes must have `fleet-provision` disabled before rebasing
+(done on 201), and the guard needs widening to `ublue-os/ucore|pumpkin-os` before new
+nodes are created against this image.
