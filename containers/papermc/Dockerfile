@@ -15,7 +15,11 @@ ADD --chmod=0644 --checksum=sha256:${PAPER_SHA256} \
     /opt/paper.jar
 
 COPY entrypoint.sh /opt/entrypoint.sh
+# The temurin base already ships uid/gid 1000 (an "ubuntu" user). The data volume is
+# owned by 1000, so reclaim the id rather than running as a different uid.
 RUN chmod 0755 /opt/entrypoint.sh \
+ && if getent passwd 1000 >/dev/null; then userdel -f "$(getent passwd 1000 | cut -d: -f1)" || true; fi \
+ && if getent group 1000 >/dev/null; then groupdel "$(getent group 1000 | cut -d: -f1)" || true; fi \
  && groupadd -g 1000 minecraft \
  && useradd -u 1000 -g 1000 -M -d /data -s /usr/sbin/nologin minecraft \
  && mkdir -p /data \
