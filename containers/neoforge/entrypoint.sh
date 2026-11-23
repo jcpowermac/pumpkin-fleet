@@ -2,16 +2,29 @@
 set -eu
 cd /opt/neoforge
 
-# Everything the server writes at runtime belongs on the volume. The loaders/args are
-# image content; world, mods, configs and logs are data.
-for p in world mods config defaultconfigs logs crash-reports \
-         server.properties eula.txt ops.json whitelist.json \
-         banned-players.json banned-ips.json usercache.json; do
-  if [ ! -e "/data/$p" ]; then
-    if [ -e "/opt/neoforge/$p" ]; then cp -a "/opt/neoforge/$p" "/data/$p"
-    else mkdir -p "/data/$p"; fi
-  fi
+# Everything the server writes at runtime belongs on the volume. The loaders and args
+# are image content; world, mods, configs and logs are data.
+#
+# NeoForge's generated unix_args.txt uses paths relative to this install root, so the
+# process must run here — hence symlinking the writable paths out onto /data instead of
+# running with /data as the working directory.
+
+# Directories: create on the volume, then link.
+for p in world mods config defaultconfigs logs crash-reports; do
+  mkdir -p "/data/$p"
   rm -rf "/opt/neoforge/$p"
+  ln -s "/data/$p" "/opt/neoforge/$p"
+done
+
+# Files: symlink only. A dangling link is correct — the server reads ENOENT as "absent"
+# and creates the file on first write. Do NOT mkdir or pre-create these: an empty
+# ops.json/banned-*.json is a parse error, and eula.txt must be a file, not a directory.
+for p in server.properties eula.txt ops.json whitelist.json \
+         banned-players.json banned-ips.json usercache.json; do
+  if [ ! -e "/data/$p" ] && [ -e "/opt/neoforge/$p" ] && [ ! -L "/opt/neoforge/$p" ]; then
+    cp -a "/opt/neoforge/$p" "/data/$p"
+  fi
+  rm -f "/opt/neoforge/$p"
   ln -s "/data/$p" "/opt/neoforge/$p"
 done
 
