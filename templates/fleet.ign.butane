@@ -12,6 +12,9 @@ passwd:
       groups:
         - wheel
         - systemd-journal
+      # No password, by design. Access is SSH-key only: a committed password hash is
+      # a committed password. If a serial-console login is ever genuinely needed, set
+      # one interactively from an SSH session (`passwd core`) - never bake it in here.
       ssh_authorized_keys:
         - ${CORE_SSH_PUB_KEY}
 
