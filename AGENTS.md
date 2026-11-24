@@ -12,6 +12,12 @@ LXCs. Access: `ssh root@172.31.12.99` (key-based); `pct exec <vmid>` for LXCs,
   symptom-recognisable sections. Check it before fighting any infra problem.
 - `docs/ldap-handoff.md` — authentik LDAP setup; current state in §10 (LDAP bind fix) and §11–12 (sssd on the game nodes + cockpit login, incl. all the sssd/cockpit gotchas).
 
+## Scope note (2026-11-24)
+
+**Ignore the legacy minecraft LXC fleet on pve3 (VMIDs 100-107: sr, velocity, usc,
+CMCS, pangolin, cmcs2, traefik, lobby) — they are the old LXD/LXC stack being
+replaced by this repo's uCore VMs (201-204) + LXC 150.**
+
 ## Gotchas that have already cost time
 
 - **Grep as `core` fails silently** (`Permission denied` → empty output reads as
