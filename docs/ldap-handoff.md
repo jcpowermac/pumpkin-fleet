@@ -207,7 +207,7 @@ authentik tag, or drive sssd from a manual LDAP bind account instead of `direct`
 
 ---
 
-## 8. What comes after LDAP works (done — see §11)
+## 8. What comes after LDAP works (done — see §11 and §12)
 
 1. ✅ **sssd on the node** — `/etc/sssd/sssd.conf` written on all four nodes, sssd
    enabled. The three non-obvious settings are in §11 (`ldap_user_name = cn`,
@@ -215,9 +215,9 @@ authentik tag, or drive sssd from a manual LDAP bind account instead of `direct`
 2. ✅ `authselect select sssd` — turned out to already be the default profile on
    FCOS/uCore; the template re-asserts it.
 3. ✅ `getent passwd jcallen` resolves on all four nodes (and PAM login verified).
-4. ⬜→✅ (pending one browser retry) Cockpit login. Cockpit is the uCore
-   **container** on **:9090** — see §12 for the two node-side gaps that made
-   it fail and how to test login without a browser.
+4. ✅ Cockpit login — verified in the browser (2026-11-24) and via the curl
+   test (§12) on all four nodes. The two node-side gaps that made it fail are
+   documented in §12.
    Its privileged mode logs in by SSHing to the host and using host users/passwords —
    and uCore already ships `/etc/ssh/sshd_config.d/90-enable-localhost-passwords.conf`
    (`Match Address 127.0.0.1,::1 / PasswordAuthentication yes`) plus the `Include` line.

@@ -10,7 +10,7 @@ LXCs. Access: `ssh root@172.31.12.99` (key-based); `pct exec <vmid>` for LXCs,
 - `docs/plan.md` — the deployment plan (checkbox-tracked, one task at a time).
 - `docs/spike-notes.md` — **everything learned the hard way**, organized as
   symptom-recognisable sections. Check it before fighting any infra problem.
-- `docs/ldap-handoff.md` — authentik LDAP setup; current state in §10 (LDAP bind fix) and §11 (sssd on the game nodes, incl. the three sssd gotchas).
+- `docs/ldap-handoff.md` — authentik LDAP setup; current state in §10 (LDAP bind fix) and §11–12 (sssd on the game nodes + cockpit login, incl. all the sssd/cockpit gotchas).
 
 ## Gotchas that have already cost time
 
