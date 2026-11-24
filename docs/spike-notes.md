@@ -377,3 +377,35 @@ never reads `authentication_flow`.** Server side: `LDAPOutpostConfigSerializer` 
   `result: 0 Success`; wrong password → `Invalid credentials (49)`.
 - Next phase (handoff §8): sssd on the node → `authselect select sssd` →
   `getent passwd jcallen` → Cockpit. `sssd.conf` does not exist yet, on purpose.
+
+## 16. Running the ghcr images on the uCore game VMs (lobby 201)
+
+The images build fine in Actions, but *consuming* them on the uCore nodes had
+four independent landmines. All fixed in `tasks/gameserver.py`; this is why each
+exists:
+
+1. **`podman run -d` dies with the SSH session that started it.** Rootless podman
+   runs in a user cgroup scoped to the session; logind tears it down on logout and
+   kills the container (clean `Exited (0)`, no error).
+   Fix: `sudo loginctl enable-linger core`. Symptom without it: container "Up" during
+   the pyinfra run, `Exited (0)` seconds after `Disconnecting from hosts`.
+2. **Data dir ownership must be set inside podman's uid namespace.** The container
+   runs as uid/gid 1000, but podman for `core` remaps uids (subuid `524288`). A
+   host-side `chown 1000:1000 /srv/<node>/data` makes the dir *root-owned inside the
+   container* → entrypoint `mkdir /data/plugins: Permission denied` loop.
+   Fix: `podman unshare chown -R 1000:1000 /srv/<node>/data`.
+3. **`--network=host`, not the default pasta.** Rootless default netns (pasta with
+   `--config-net`) gave the guest the *host's own IP* (10.10.10.54) and the
+   host→guest forward never delivered: TCP connects, handshake times out, and
+   `cat /proc/net/tcp` inside the guest shows only the LISTEN socket, never an
+   ESTABLISHED one. `--network=host` sidesteps it entirely (one server per VM).
+4. **firewalld (FedoraServer zone) drops the game port.** uCore enables firewalld
+   with only ssh/cockpit open; the port bind lands on the host interface and is
+   dropped. Fix: `firewall-cmd --add-port=25565/tcp --permanent && reload`.
+   Does not survive an OSTree rebase — revisit for Task 7 Step 3.
+
+**Verifying a server is really up:** `scripts/mc-ping.py <ip> 25565` does a real
+protocol-777 status ping (varint framing; the server never acks the handshake — it
+waits straight for the status request; status response is
+`[packet id][string len][JSON]`). A plain TCP connect is not enough: pasta accepts
+the SYN before it's proven it forwards.
