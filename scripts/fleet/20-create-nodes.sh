@@ -17,6 +17,13 @@ set -a; source configs/pins.env; set +a
 SSHKEY="$(cat "$CORE_SSH_PUB_KEY_FILE")"
 command -v butane >/dev/null || { echo "butane not found" >&2; exit 1; }
 
+# sssd bind credential lives in CT 150 (/root/ldap-user-password, "<user> <pass>"); fetch it
+# rather than duplicating it here.
+SSSD_BIND="$(ssh "$PVE_HOST" pct exec 150 -- cut -d' ' -f1,2 /root/ldap-user-password | tr -d '\n')"
+SSSD_BIND_USER="${SSSD_BIND%% *}"
+SSSD_BIND_AUTHTOK="${SSSD_BIND##* }"
+[[ "$SSSD_BIND_USER" != "$SSSD_BIND_AUTHTOK" ]] || { echo "SSSD bind credential not parsed" >&2; exit 1; }
+
 NODES=(
   "${VMID_LOBBY}:lobby:${IP_LOBBY}"
   "${VMID_PLUGINS}:plugins:${IP_PLUGINS}"
@@ -31,7 +38,8 @@ for entry in "${NODES[@]}"; do
 
   SPIKE_HOSTNAME="$name" SPIKE_IP4="$ip/24" FLEET_GW="$FLEET_GW" \
   UCORE_IMAGE="$UCORE_IMAGE" UCORE_TAG="$UCORE_TAG" CORE_SSH_PUB_KEY="$SSHKEY" \
-  envsubst '${SPIKE_HOSTNAME} ${SPIKE_IP4} ${FLEET_GW} ${UCORE_IMAGE} ${UCORE_TAG} ${CORE_SSH_PUB_KEY}' \
+  IP_AUTHENTIK="$IP_AUTHENTIK" SSSD_BIND_USER="$SSSD_BIND_USER" SSSD_BIND_AUTHTOK="$SSSD_BIND_AUTHTOK" \
+  envsubst '${SPIKE_HOSTNAME} ${SPIKE_IP4} ${FLEET_GW} ${UCORE_IMAGE} ${UCORE_TAG} ${CORE_SSH_PUB_KEY} ${IP_AUTHENTIK} ${SSSD_BIND_USER} ${SSSD_BIND_AUTHTOK}' \
     < templates/fleet.ign.butane > "build/nodes/${name}.butane"
   butane -r "build/nodes/${name}.butane" > "build/nodes/${name}.ign"
   python3 -m json.tool "build/nodes/${name}.ign" >/dev/null

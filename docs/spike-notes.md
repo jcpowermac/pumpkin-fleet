@@ -354,3 +354,26 @@ ostree-unverified-registry:ghcr.io/jcpowermac/pumpkin-os@sha256:<digest>
 uCore and reboot — a loop. Nodes must have `fleet-provision` disabled before rebasing
 (done on 201), and the guard needs widening to `ublue-os/ucore|pumpkin-os` before new
 nodes are created against this image.
+
+---
+
+## 15. authentik LDAP: the bind flow is the provider's `authorization_flow`
+
+Full story in `docs/ldap-handoff.md` §10. The one-liner that will trip you up again:
+
+**The Go LDAP outpost executes the provider's `authorization_flow` on every bind — it
+never reads `authentication_flow`.** Server side: `LDAPOutpostConfigSerializer` sets
+`bind_flow_slug = authorization_flow.slug` (fetched by the outpost at
+`/api/v3/outposts/ldap/`).
+
+- Symptom when misconfigured: bind "passes" (empty auth flow = passes for anyone), then
+  the outpost's `GET /api/v3/core/users/me/` 403s (`auth_via: unauthenticated` in the
+  `authentik-server` log) → `ldap_bind: Operations error (1)` + outpost log
+  `failed to get user info`. Wrong passwords also pass, until you catch it.
+- Current state (2026-11-23, verified working): `fleet-ldap` provider (pk 1) has
+  **both** `authentication_flow` and `authorization_flow` = `ldap-bind`
+  (identification → password → user_login, `authentication: none`,
+  `policy_engine_mode: all`). `ldapsearch` over `ldaps://127.0.0.1:6636` returns
+  `result: 0 Success`; wrong password → `Invalid credentials (49)`.
+- Next phase (handoff §8): sssd on the node → `authselect select sssd` →
+  `getent passwd jcallen` → Cockpit. `sssd.conf` does not exist yet, on purpose.

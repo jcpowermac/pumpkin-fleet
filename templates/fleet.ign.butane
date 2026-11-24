@@ -79,6 +79,13 @@ storage:
             # and cockpit-files gives the ops class its file manager.
             /usr/bin/systemctl enable --now cockpit.service 2>/dev/null || true
             /usr/bin/systemctl enable --now qemu-guest-agent.service 2>/dev/null || true
+            # sssd -> authentik LDAP outpost (CT 150). The conf is baked in by Ignition above;
+            # the outpost listens on 6636, a non-standard LDAPS port SELinux would otherwise
+            # reject (connect() EACCES for sssd_be). authselect is already on the sssd profile
+            # by default on FCOS/uCore; the select re-asserts it.
+            /usr/bin/semanage port -a -t ldap_port_t -p tcp 6636 2>/dev/null || true
+            /usr/bin/authselect select sssd 2>/dev/null || true
+            /usr/bin/systemctl enable --now sssd.service 2>/dev/null || true
             exit 0
           fi
 
@@ -99,3 +106,44 @@ storage:
       overwrite: true
       contents:
         inline: ${SPIKE_HOSTNAME}
+
+    # authentik LDAP -> sssd. Written at FCOS first boot; /etc survives the uCore rebase.
+    # Gotchas baked in (see docs/ldap-handoff.md §10): the outpost's user DN uses cn= as the
+    # name attribute (uid is a UUID), and group membership is RFC 2307bis (member DNs).
+    # enumerate=true so group members resolve even on a cold cache. root:root 0640 because
+    # the sssd group may not exist yet when Ignition runs.
+    - path: /etc/sssd/sssd.conf
+      # Ignition files default to root:root (butane's fcos variant has no owner key),
+      # which is what we want: the sssd group may not exist yet at first-boot time.
+      mode: 0640
+      overwrite: true
+      contents:
+        inline: |
+          [sssd]
+          config_file_version = 2
+          services = nss, pam
+          domains = ldap.goauthentik.io
+
+          [nss]
+          filter_groups = root
+          filter_users = root
+
+          [pam]
+          offline_credentials_expiration = 60
+
+          [domain/ldap.goauthentik.io]
+          id_provider = ldap
+          auth_provider = ldap
+          chpass_provider = ldap
+          ldap_uri = ldaps://${IP_AUTHENTIK}:6636
+          ldap_search_base = dc=ldap,dc=goauthentik,dc=io
+          ldap_user_search_base = ou=users,dc=ldap,dc=goauthentik,dc=io
+          ldap_group_search_base = ou=groups,dc=ldap,dc=goauthentik,dc=io
+          ldap_user_name = cn
+          ldap_schema = rfc2307bis
+          ldap_default_bind_dn = cn=${SSSD_BIND_USER},ou=users,dc=ldap,dc=goauthentik,dc=io
+          ldap_default_authtok = ${SSSD_BIND_AUTHTOK}
+          ldap_tls_reqcert = never
+          enumerate = true
+          default_shell = /bin/bash
+          cache_credentials = true

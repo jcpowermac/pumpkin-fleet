@@ -7,9 +7,10 @@ paths (all `0600`, on the host they live on).
 **Goal:** a Minecraft-fleet admin (`jcallen`) logs into Cockpit on a game node with their
 authentik account.
 
-**Where it stands:** authentication works, attribute lookup does not. `ldapsearch`
-returns `Operations error (1)`; the outpost log shows `failed to get user info`.
-Nothing downstream (sssd, cockpit) has been configured yet, on purpose.
+**Where it stands: the LDAP bind works.** `ldapsearch` with the test user returns
+`result: 0 Success`; a wrong password now correctly returns `Invalid credentials (49)`. Root
+cause and fix are in **§10**. Nothing downstream (sssd, cockpit) is configured yet —
+§8 is the next phase.
 
 ---
 
@@ -175,7 +176,7 @@ logs `Flow is empty` — that is expected and tolerated (the bind proceeds past 
 
 ---
 
-## 7. Best next step
+## 7. Best next step (executed — see §10)
 
 **Find out what the outpost actually sends on that "get user info" call.** Do it from the
 wire, not by inference — that single observation splits the problem in two:
@@ -206,22 +207,17 @@ authentik tag, or drive sssd from a manual LDAP bind account instead of `direct`
 
 ---
 
-## 8. What comes after LDAP works (not started, in order)
+## 8. What comes after LDAP works (done — see §11)
 
-1. **sssd on the node.** `lobby` (10.10.10.54) already runs the fleet image and has
-   `sssd`, `sssd-ldap`, `sssd-tools`, `oddjob-mkhomedir` installed (baked by BlueBuild,
-   see `recipes/fleet.yml`). **There is no `/etc/sssd/sssd.conf` yet — deliberately.**
-   It needs roughly: `id_provider=ldap`, `ldap_uri=ldaps://10.10.10.53:6636`,
-   `ldap_tls_reqcert=never`, `ldap_search_base=dc=ldap,dc=goauthentik,dc=io`,
-   `ldap_user_search_base=ou=users,dc=ldap,dc=goauthentik,dc=io`,
-   `ldap_default_bind_dn=cn=<svc>,ou=users,…`, `ldap_default_authtok=<pw>`,
-   `default_shell=/bin/bash` (so cockpit can open a session), and start `sssd`.
-2. `authselect select sssd` on the node (current profile is `local`) to wire
-   `/etc/nsswitch.conf` and `/etc/pam.d`.
-3. `getent passwd jcallen` must resolve **before** touching cockpit.
-4. Then Cockpit login. Relevant: cockpit here is the uCore **container**. Its privileged
-   mode logs in by SSHing to the host and using host users/passwords — and uCore already
-   ships `/etc/ssh/sshd_config.d/90-enable-localhost-passwords.conf`
+1. ✅ **sssd on the node** — `/etc/sssd/sssd.conf` written on all four nodes, sssd
+   enabled. The three non-obvious settings are in §11 (`ldap_user_name = cn`,
+   `ldap_schema = rfc2307bis`, SELinux port label for 6636).
+2. ✅ `authselect select sssd` — turned out to already be the default profile on
+   FCOS/uCore; the template re-asserts it.
+3. ✅ `getent passwd jcallen` resolves on all four nodes (and PAM login verified).
+4. ⬜ Cockpit login (browser). Cockpit is the uCore **container** on **:9090**.
+   Its privileged mode logs in by SSHing to the host and using host users/passwords —
+   and uCore already ships `/etc/ssh/sshd_config.d/90-enable-localhost-passwords.conf`
    (`Match Address 127.0.0.1,::1 / PasswordAuthentication yes`) plus the `Include` line.
    Verify with `sudo sshd -T -C addr=127.0.0.1,user=core` → `yes`, and
    `-C addr=10.10.10.1,user=core` → `no`. **Do not add another drop-in; it is redundant.**
@@ -239,8 +235,155 @@ authentik tag, or drive sssd from a manual LDAP bind account instead of `direct`
   `pct exec 150 -- bash -s <<'CT' … CT` and write Python to a file with `pct push`.
 - The authentik `manage.py` shell prints
   `229 objects imported automatically` on stderr; filter it out when parsing.
-- `/` on the authentik web UI redirects to `/setup` (the first-run wizard) even though
-  `akadmin` has a working password and the API accepts the token. Log in directly at
-  `https://10.10.10.53:9443/if/flow/default-authentication-flow/`. **Unresolved why** —
-  possibly relevant to the brand's `flow_authentication`; worth a look if you run out of
-  ideas on the main blocker.
+- ~~`/` on the authentik web UI redirects to `/setup` …~~ **Resolved (2026-11-23):**
+  the OOBE wizard had never been completed, so `Setup` flag was `False` and `/setup`
+  ran the `initial-setup` flow — whose OOBE policy `default-oobe-password-usable`
+  fails for anonymous requests (`policy_engine_mode: any` + one failing policy =
+  non-applicable) → 500 `FlowNonApplicableException`. Fixed by completing OOBE the way
+  the wizard's `PostSetupStageView` does: `Setup.set(True)`, disable OOBE
+  `BlueprintInstance`s, set `initial-setup` to `REQUIRE_SUPERUSER`, and set the tenant
+  `base_url` to `https://10.10.10.53:9443`. `/` now lands on the login page (200).
+
+---
+
+## 10. Resolution (2026-11-23, continued session)
+
+**Root cause — the bind flow that actually runs is the provider's `authorization_flow`,
+not its `authentication_flow`.**
+
+The Go LDAP outpost does not read `authentication_flow` at all. `refresh.go` builds the
+provider instance with `authenticationFlowSlug: provider.BindFlowSlug`, where the
+`bind_flow_slug` comes from the outpost config endpoint
+`/api/v3/outposts/ldap/`. On the server side
+(`authentik/providers/ldap/api.py`, `LDAPOutpostConfigSerializer`):
+
+```python
+bind_flow_slug = CharField(source="authorization_flow.slug")
+```
+
+So every LDAP bind executed the provider's **authorization flow**, which was still the
+stock **empty** `default-provider-authorization-implicit-consent` (it had only been fixed
+to `authentication: none`, which is what let it "pass"). An empty flow returns a redirect
+challenge immediately → `passed=true`, **no `user_login` stage ever ran, no
+`authentik_session` cookie was ever set**. `check_access` then passed for the anonymous
+request (empty flow = passes for anyone), and the outpost's follow-up
+`GET /api/v3/core/users/me/` went out with **no credentials at all** — confirmed server
+side: `auth_via: "unauthenticated", "user": "", "status": 403,
+user_agent: "goauthentik.io/outpost/2026.8.6"`. (The Go client carries the flow's session
+cookie in an `http.CookieJar`; there was also no Bearer header —
+`TokenAuthentication` only reads `Authorization: Bearer`, and the
+`X-authentik-outpost-token` header only feeds the remote-IP override middleware.)
+
+This also explains why the `ldap-bind` flow (identification → password → login,
+`authentication: none`, `policy_engine_mode: all`) never appeared in the server request
+log during a bind.
+
+**Fix (one API PATCH):**
+
+```sh
+TOK=$(pct exec 150 -- cat /root/authentik-api-token)
+curl -s -X PATCH -H "Authorization: Bearer $TOK" -H 'Accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{"authorization_flow": "0347f4f1-d5e9-414f-b6bc-2c61df0139a4"}' \
+  http://127.0.0.1:9000/api/v3/providers/ldap/1/   # ldap-bind flow pk
+```
+(run inside CT 150), then `systemctl restart authentik-ldap`.
+
+**Verified after the fix:**
+- `ldapsearch` (§3) → `result: 0 Success`, returns `cn=jcallen,ou=users,…` + `mail`.
+- Same bind with a **wrong password** → `ldap_bind: Invalid credentials (49)` —
+  credentials are genuinely checked now (before, the empty flow would have passed
+  anything, so don't trust pre-fix negative tests).
+
+**State changes vs. §2/§5:** provider `fleet-ldap` now has
+`authentication_flow = ldap-bind` **and** `authorization_flow = ldap-bind` (same flow,
+pk `0347f4f1-d5e9-414f-b6bc-2c61df0139a4`).
+`default-provider-authorization-implicit-consent` is no longer referenced by the provider
+at all. The §5 note about it logging `Flow is empty` is stale.
+
+**Gotchas hit in this session:**
+- `tcpdump` was not installed in CT 150 (`apt-get install -y tcpdump`). Loopback traffic
+  to 9443 is TLS, so wire capture shows ciphertext — the **server-side** request log
+  (`journalctl -u authentik-server`, `authentik.asgi` lines carry `event`/`status`/
+  `auth_via`/`user_agent`) was the right tool; no log-level change needed.
+- The provider list endpoint is `/api/v3/providers/ldap/` but **does not expose
+  `bind_flow``; the flow wiring only shows up at `/api/v3/outposts/ldap/`
+  (`bind_flow_slug`) and as `authentication_flow`/`authorization_flow` on the provider.
+  `/api/v3/flows/` is 404 — it's `/api/v3/flows/instances/`.
+
+## 11. sssd / game-node phase (2026-11-24)
+
+Done on all four nodes (201–204): `getent passwd jcallen`, `getent group fleet-admins`
+(with member list), and PAM login (`sudo -Su jcallen true` with the LDAP password) all
+pass. Cockpit login is the remaining browser-side step (§8.4).
+
+**The config** (identical on every node; now baked into
+`templates/fleet.ign.butane` so new nodes get it at first boot, and
+`scripts/fleet/20-create-nodes.sh` fetches the bind credential from CT 150's
+`/root/ldap-user-password` at render time):
+
+```ini
+[domain/ldap.goauthentik.io]
+id_provider = ldap
+auth_provider = ldap
+chpass_provider = ldap
+ldap_uri = ldaps://10.10.10.53:6636
+ldap_user_search_base = ou=users,dc=ldap,dc=goauthentik,dc=io
+ldap_group_search_base = ou=groups,dc=ldap,dc=goauthentik,dc=io
+ldap_user_name = cn            # (1)
+ldap_schema = rfc2307bis       # (2)
+ldap_default_bind_dn = cn=jcallen,ou=users,dc=ldap,dc=goauthentik,dc=io
+ldap_default_authtok = <jcallen's password>
+ldap_tls_reqcert = never
+enumerate = true               # (3)
+default_shell = /bin/bash
+cache_credentials = true
+```
+
+Plus two node steps that are **not** in the conf (template runs them post-rebase):
+`semanage port -a -t ldap_port_t -p tcp 6636` (4) and
+`systemctl enable --now sssd` (authselect is already on the sssd profile).
+
+**The gotchas — each one cost a full debug round, don't re-debug them:**
+1. **`ldap_user_name = cn`.** authentik's LDAP user entries put the *username* in `cn`;
+   the `uid` attribute is a **UUID**. sssd's default (`uid`) finds nothing. Symptom:
+   everything else looks right, `getent passwd` just misses.
+2. **`ldap_schema = rfc2307bis`.** authentik stores group members as full DNs in the
+   group's `member` attribute (RFC 2307bis). sssd's default schema (`rfc2307`) expects
+   usernames in `memberUid`; given DNs it can't canonicalize them to users and caches
+   them as **ghost members with the raw DN as the name**. Symptom: `getent group`
+   → `error writing group entry: Invalid argument`, `id jcallen` missing the group,
+   sssd log `member #0 (cn=…): not found in sysdb / Adding a ghost entry`. Once a ghost
+   is cached it survives `sss_cache -E`-looking behavior — do a hard
+   `systemctl stop sssd && sss_cache -E && systemctl start sssd` to get clean entries.
+3. **`enumerate = true`** keeps the user cached so group-member resolution never races
+   the first user lookup on a cold cache (a fresh node querying a group before the user
+   will otherwise mint a ghost).
+4. **SELinux port label.** 6636 is not labeled `ldap_port_t` by default; `sssd_be`
+   dies on `connect() = -1 EACCES` with nothing useful in the logs. `semanage port -a`
+   is the fix. (strace from a podman container with
+   `--pid=host --network=host` against the live sssd_be was how this was confirmed —
+   the sssd logs say `connecting to LDAP server` and then… nothing.)
+
+**Debug tooling that worked:** `sssd -D 9` (temp `debug_level = 9` in the domain
+section) + `grep -aE 'search|filter|member' /var/log/sssd/sssd_ldap.*.log`; and
+`python3 -c 'import grp; …'` on the node — it exercises NSS without glibc's `getent`
+choking on malformed ghost entries, so you can see *what* a group entry actually
+contains.
+
+**API-token gotcha (CT 150):** the `fleet-api` token in `/root/authentik-api-token`
+**expires after 24h by default** — and authentik's `expire_action` *rotates the key in
+place* (row stays, key changes), so every API call afterwards 403s with
+`Token invalid/expired` while the token still "exists". Fixed by
+`Token.objects.get(identifier="fleet-api").update(expires=None)` + new key. If the API
+starts 403ing again: check `Token` rows in `manage.py shell` (key rotation, not
+missing rows). Note `manage.py shell` runs in the **default tenant's schema**
+(`public` here); the token table elsewhere is empty.
+
+**Environment notes from this session:**
+- The API path for property mappings is `/api/v3/propertymappings/all/`
+  (no underscores) — `/api/v3/core/property_mappings/` 404s.
+- `pct exec 150` + `manage.py shell` prints a wall of JSON log lines; filter with
+  `grep -aE '^MARKER'`.
+- The node fleet image already ships sssd + oddjob-mkhomedir (no install step needed);
+  `policycoreutils` (semanage) and `authselect` are also present on uCore.
