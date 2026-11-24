@@ -63,6 +63,26 @@ server.shell(
         + " | sudo base64 -d | sudo tee /etc/polkit-1/rules.d/60-cockpit-ops.rules >/dev/null"
     ),
 )
+# Cockpit's superuser acquisition prefers the SUDO config (it's first and valid
+# whenever `sudo -A` works), and does NOT fall through to the polkit config if
+# sudo fails. An LDAP/authentik user not in sudoers therefore gets a non-privileged
+# session. Grant the ops group passwordless sudo for the bridge so the session
+# gains superuser (needed for the podman panel to detect other users' containers).
+_sudoers = (
+    "# Fleet operators (authentik group via sssd) may run the privileged cockpit\n"
+    "# bridge passwordless (see tasks/gameserver.py).\n"
+    f"%{OPS_GROUP} ALL=(root) NOPASSWD: /usr/sbin/cockpit-bridge, /usr/bin/cockpit-bridge\n"
+)
+server.shell(
+    name="Sudoers: ops group may run privileged cockpit bridge",
+    commands=(
+        "echo "
+        + base64.b64encode(_sudoers.encode()).decode()
+        + " | sudo base64 -d | sudo tee /etc/sudoers.d/cockpit-fleet >/dev/null"
+        + " && sudo chmod 0440 /etc/sudoers.d/cockpit-fleet"
+        + " && sudo visudo -cf /etc/sudoers.d/cockpit-fleet >/dev/null"
+    ),
+)
 # Keep the podman API socket alive across reboots (cockpit-podman connects here;
 # with linger on, the user manager stays up so this socket persists).
 server.shell(name="Enable podman.socket (user unit)", commands="systemctl --user enable --now podman.socket")
