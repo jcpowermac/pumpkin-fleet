@@ -86,6 +86,12 @@ storage:
             /usr/bin/semanage port -a -t ldap_port_t -p tcp 6636 2>/dev/null || true
             /usr/bin/authselect select sssd 2>/dev/null || true
             /usr/bin/systemctl enable --now sssd.service 2>/dev/null || true
+            # Home dir for the LDAP user (uid 2007, primary group fleet-admins 29163 —
+            # both come from authentik; see docs/ldap-handoff.md §11). Without it,
+            # cockpit's beiboot agent-socket prep and cockpit-bridge choke on a
+            # missing homedir, and nothing on the node creates it (authselect's
+            # sssd profile has no pam_mkhomedir).
+            /usr/bin/install -d -o 2007 -g 29163 -m 0750 /home/jcallen 2>/dev/null || true
             exit 0
           fi
 

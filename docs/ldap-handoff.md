@@ -215,7 +215,9 @@ authentik tag, or drive sssd from a manual LDAP bind account instead of `direct`
 2. ✅ `authselect select sssd` — turned out to already be the default profile on
    FCOS/uCore; the template re-asserts it.
 3. ✅ `getent passwd jcallen` resolves on all four nodes (and PAM login verified).
-4. ⬜ Cockpit login (browser). Cockpit is the uCore **container** on **:9090**.
+4. ⬜→✅ (pending one browser retry) Cockpit login. Cockpit is the uCore
+   **container** on **:9090** — see §12 for the two node-side gaps that made
+   it fail and how to test login without a browser.
    Its privileged mode logs in by SSHing to the host and using host users/passwords —
    and uCore already ships `/etc/ssh/sshd_config.d/90-enable-localhost-passwords.conf`
    (`Match Address 127.0.0.1,::1 / PasswordAuthentication yes`) plus the `Include` line.
@@ -387,3 +389,61 @@ missing rows). Note `manage.py shell` runs in the **default tenant's schema**
   `grep -aE '^MARKER'`.
 - The node fleet image already ships sssd + oddjob-mkhomedir (no install step needed);
   `policycoreutils` (semanage) and `authselect` are also present on uCore.
+
+## 12. Cockpit login (2026-11-24, second half)
+
+Symptom: browser login as `jcallen` → `failed, wrong user or password`, even though
+plain SSH with the same password works from the node (`ssh jcallen@127.0.0.1` with a
+password, or `sudo -Su jcallen true`).
+
+**The auth chain is: browser → cockpit-ws (container) → local SSH to 127.0.0.1 →
+host sshd → PAM (pam_sss) → sssd → LDAP, then beiboot runs `cockpit-bridge` as the
+user on the host.** The SSH+PAM half was fine all along; the bridge half had two gaps:
+
+1. **Primary group gid not in the directory.** authentik's Go outpost computes a user's
+   `gidNumber` as `user attribute "gidNumber"` **or, if unset, the uidNumber**
+   (`internal/outpost/ldap/utils.go: GetUserGidNumber`). jcallen had no `gidNumber`
+   attribute → `gidNumber: 2007` = his uidNumber, but **no group object with
+   gidNumber 2007 exists** in LDAP (only `fleet-admins`, 29163). sssd/glibc don't care
+   about a missing primary group, but `cockpit-bridge` does:
+   `KeyError: 'getgrgid(): gid not found: 2007'` in `internal_endpoints.py`.
+   **Fix:** set the user attribute `gidNumber` to the gid of a real group:
+   `PATCH /api/v3/core/users/7/ {"attributes": {"gidNumber": "29163"}}`
+   (string, not int). jcallen's primary group is now `fleet-admins`.
+2. **No home dir.** `/home/jcallen` didn't exist: beiboot's agent-socket prep fails
+   (`mkdir /home/jcallen/.ssh: No such file or directory`) and the bridge wants its
+   dotfiles. Nothing creates the home: **authselect's sssd profile on FCOS/uCore has no
+   `pam_mkhomedir` line** (check `sudo grep mkhomedir /etc/pam.d/password-auth` — empty).
+   oddjob-mkhomedir is installed but unwired. **Fix:** pre-create
+   `install -d -o 2007 -g 29163 -m 0750 /home/jcallen` (now in the template's
+   post-rebase branch; done on all four nodes).
+
+**Testing cockpit login without a browser** (the real endpoint is **`/cockpit/login`**,
+not `/login` — plain `GET /` just serves the SPA and never attempts auth; that is why
+hours of curling `/` produced zero log lines):
+
+```sh
+# on the node; password is NUL-suffixed (known-hosts slot, empty for local login)
+AUTH=$(printf 'jcallen:<pw>\0' | base64 -w0)
+curl -sk -H "Authorization: Basic $AUTH" -H "X-Superuser: none" \
+  https://127.0.0.1:9090/cockpit/login
+```
+Success = `HTTP 200` + JSON `{"csrf-token": …, "login-data": …}`; failure = `401` +
+`{"problem": "authentication-failed", "message": <sshd+beiboot stderr>}` — the 401
+message is the actual error, read it before re-testing the password.
+
+**Cockpit container log gotchas (wasted real time):**
+- `podman logs ws` only shows **g_message-and-up**; the container has no `/dev/log` and
+  g_debug lines go nowhere unless you're running under the unit. A failed login with a
+  socket error shows up (e.g. `/run/cockpit/session: couldn't connect` — that line is
+  the **tls-cert** path, i.e. the browser presented a client certificate; see
+  `cockpitauth.c`: a peer TLS cert makes the auth type *definitively* `tls-cert`, which
+  needs the socket-activated session program that a container doesn't have). If your
+  browser ever auto-presents a client cert, log in from incognito or another browser.
+- For full logs, run the image manually on a scratch port:
+  `podman run --rm -d -p 9091:9091 -v /:/host --pid host --privileged
+   quay.io/cockpit/ws:latest /container/label-run --port 9091 --no-tls`
+  (note: `--no-tls` mode also works for the `/cockpit/login` curl test).
+- The systemd unit is generated from `[X-Container]`; a drop-in `[X-Container]
+  Environment=…` does **not** reach the generated `ExecStart`'s `--env` — to change
+  container env, run podman manually.
