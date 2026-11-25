@@ -40,5 +40,16 @@
       "VELOCITY_VERSION": "4.3.1-45",
       "VELOCITY_SHA256": "0844bcabdcdb4f5b875906fd4c3365bc1bb76918e42bc595ed88ad195258dd75"
     }
+  },
+  {
+    "name": "fabric",
+    "version": "26.3-0.20.1",
+    "args": {
+      "FABRIC_MC": "26.3",
+      "FABRIC_LOADER": "0.20.1",
+      "FABRIC_API": "0.167.0+26.3",
+      "OPANEL_VERSION": "2.2.11",
+      "OPANEL_ASSET": "opanel-fabric-26.1-build-2.2.11.jar"
+    }
   }
 ]

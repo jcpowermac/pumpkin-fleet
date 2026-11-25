@@ -1,6 +1,6 @@
 name: containers
 
-# Builds the four server images on GitHub's runners and pushes them to ghcr.io.
+# Builds the five server images on GitHub's runners and pushes them to ghcr.io.
 # The uCore VMs never need a build toolchain or a source checkout — they pull
 # ghcr.io/<owner>/<repo>/<image>:<version> and nothing else.
 #
