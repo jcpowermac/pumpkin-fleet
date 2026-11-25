@@ -21,6 +21,9 @@ ADD --chmod=0755 --checksum=sha256:${PUMPKIN_SHA256} \
 
 # PatchBukkit is a native plugin library loaded from the server's plugins/ directory.
 # It is seeded from here into the volume on first start, so the image stays the pin.
+# mkdir first: ADD from a URL creates implicit parents as 0644, which uid 1000
+# cannot traverse, so the entrypoint's `[ -e ]` guard silently skipped the seed.
+RUN mkdir -p -m 0755 /opt/bundled-plugins
 ADD --chmod=0644 --checksum=sha256:${PATCHBUKKIT_SHA256} \
     https://github.com/Pumpkin-MC/PatchBukkit/releases/download/${PATCHBUKKIT_VERSION}/libpatchbukkit-X64-Linux.so \
     /opt/bundled-plugins/libpatchbukkit-X64-Linux.so

@@ -7,6 +7,14 @@
       "PUMPKIN_SHA256": "3755df414cdece664223388a93421c5c674682f5b9264387416b8a9074cd8d59",
       "PATCHBUKKIT_VERSION": "0.2.2",
       "PATCHBUKKIT_SHA256": "d4db46ed76d5f8c2306b225343f17ee60dc140ffb2fd412292d098bb8e9aacdf"
+    },
+    "plugins": {
+      "opanel": {
+        "version": "2.2.11",
+        "url": "https://worker.opanel.cn/download/2.2.11/opanel-pumpkin-x86_64-unknown-linux-gnu-build-2.2.11.so",
+        "sha256": "9b6f0d6cc2ff2ade96f53ef212d425377d25a89c9bc40e0556198d66d577881e",
+        "_note": "Native Pumpkin plugin (cdylib). Statically links Pumpkin's API, so it is VERSION-LOCKED to this entry's pumpkin version: bump both together or the server panics on load (see opanel.cn/docs/versions). Installed into the /data volume, not the image, so its 111 MB never ships in every layer."
+      }
     }
   },
   {

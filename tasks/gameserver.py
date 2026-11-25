@@ -94,6 +94,27 @@ server.shell(
     name=f"Pull {image} (skip if already local)",
     commands=f"podman image exists {image} || podman pull {image}",
 )
+
+# OPanel is a native Pumpkin plugin (cdylib) that runs in-process inside the server.
+# It goes into the bind-mounted /data volume, not the image: 111 MB, and it is
+# version-locked to the pumpkin pin above (mismatch panics the server).
+# Written by a throwaway container because a host-side copy lands with the wrong
+# SELinux MCS categories and uid mapping, and the server then cannot read it.
+opanel = next(i for i in IMAGES if i["name"] == image_name).get("plugins", {}).get("opanel")
+if opanel:
+    server.shell(
+        name=f"Install OPanel {opanel['version']} into the data volume",
+        commands=(
+            f"podman run --rm --entrypoint sh -v {data_dir}:/data:Z {image} "
+            f"-c 'sha256sum /data/plugins/libopanel_pumpkin.so 2>/dev/null' "
+            f"| grep -q {opanel['sha256']} && exit 0; "
+            f"curl -fsSL -o /tmp/opanel.so {opanel['url']} && "
+            f"echo '{opanel['sha256']}  /tmp/opanel.so' | sha256sum -c - >/dev/null && "
+            f"podman run --rm -i --entrypoint sh --user 1000:1000 -v {data_dir}:/data:Z {image} "
+            f"-c 'cat > /data/plugins/libopanel_pumpkin.so' < /tmp/opanel.so && "
+            "rm -f /tmp/opanel.so"
+        ),
+    )
 server.shell(
     name=f"Run {node} server container",
     commands=(
@@ -124,6 +145,14 @@ server.shell(
     commands="firewall-cmd --add-port=25565/tcp --permanent && firewall-cmd --reload",
     _sudo=True,
 )
+# OPanel listens on 3000 by default (host networking, so no mapping). Internal
+# only until Task 7 Step 5 puts authentik OIDC + the Traefik route in front of it.
+if opanel:
+    server.shell(
+        name="Allow 3000/tcp (OPanel) through firewalld",
+        commands="firewall-cmd --add-port=3000/tcp --permanent && firewall-cmd --reload",
+        _sudo=True,
+    )
 server.shell(
     name=f"{node} answers on {ip}:25565",
     commands=f"timeout 2 bash -c 'exec 3<>/dev/tcp/{ip}/25565' || exit 1",
