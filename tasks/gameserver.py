@@ -101,17 +101,20 @@ server.shell(
 # version-locked to the pumpkin pin above (mismatch panics the server).
 # Written by a throwaway container because a host-side copy lands with the wrong
 # SELinux MCS categories and uid mapping, and the server then cannot read it.
+# label=disable + no :Z: relabelling a shared volume with :Z makes it private to
+# the throwaway container, which then locks the live server out of its own data.
 opanel = next(i for i in IMAGES if i["name"] == image_name).get("plugins", {}).get("opanel")
 if opanel:
     server.shell(
         name=f"Install OPanel {opanel['version']} into the data volume",
         commands=(
-            f"podman run --rm --entrypoint sh -v {data_dir}:/data:Z {image} "
+            f"podman run --rm --security-opt label=disable --entrypoint sh -v {data_dir}:/data {image} "
             f"-c 'sha256sum /data/plugins/libopanel_pumpkin.so 2>/dev/null' "
             f"| grep -q {opanel['sha256']} && exit 0; "
             f"curl -fsSL -o /tmp/opanel.so {opanel['url']} && "
             f"echo '{opanel['sha256']}  /tmp/opanel.so' | sha256sum -c - >/dev/null && "
-            f"podman run --rm -i --entrypoint sh --user 1000:1000 -v {data_dir}:/data:Z {image} "
+            f"podman run --rm -i --security-opt label=disable --entrypoint sh --user 1000:1000 "
+            f"-v {data_dir}:/data {image} "
             f"-c 'cat > /data/plugins/libopanel_pumpkin.so' < /tmp/opanel.so && "
             "rm -f /tmp/opanel.so"
         ),
