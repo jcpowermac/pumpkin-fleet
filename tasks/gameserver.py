@@ -66,12 +66,15 @@ server.shell(
 # Cockpit's superuser acquisition prefers the SUDO config (it's first and valid
 # whenever `sudo -A` works), and does NOT fall through to the polkit config if
 # sudo fails. An LDAP/authentik user not in sudoers therefore gets a non-privileged
-# session. Grant the ops group passwordless sudo for the bridge so the session
-# gains superuser (needed for the podman panel to detect other users' containers).
+# session. Grant the ops group sudo for the bridge — but DELIBERATELY without
+# NOPASSWD, so elevation is gated by the operator's own (LDAP) password: Cockpit's
+# documented "reuse my password for privileged tasks" model. Consciously opting in
+# per session, and auditable in the sudo log. (Needed because the podman panel opens
+# other users' podman sockets in the root bridge.)
 _sudoers = (
     "# Fleet operators (authentik group via sssd) may run the privileged cockpit\n"
-    "# bridge passwordless (see tasks/gameserver.py).\n"
-    f"%{OPS_GROUP} ALL=(root) NOPASSWD: /usr/sbin/cockpit-bridge, /usr/bin/cockpit-bridge\n"
+    "# bridge, gated by their own (LDAP) password. No NOPASSWD on purpose.\n"
+    f"%{OPS_GROUP} ALL=(root) /usr/sbin/cockpit-bridge, /usr/bin/cockpit-bridge\n"
 )
 server.shell(
     name="Sudoers: ops group may run privileged cockpit bridge",
