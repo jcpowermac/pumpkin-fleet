@@ -7,6 +7,7 @@ flags follow containers/README.md "Running one". Data dir is bind-mounted at
 Usage: uv run pyinfra inventory/hosts.py --limit lobby tasks/gameserver.py
 """
 import base64
+import hashlib
 import json
 from pathlib import Path
 
@@ -115,9 +116,22 @@ if opanel:
             "rm -f /tmp/opanel.so"
         ),
     )
+# Recreating the container wipes OPanel's in-memory session registry, so every
+# logged-in browser is 401'd (their JWT is still signed and unexpired, but no
+# longer "active"), which shows up as "Unable to connect to the server" plus
+# "Unable to connect to the WebSocket of terminal". Upstream /api/auth/check is
+# broken (500) so the panel never bounces to login either. So only recreate when
+# the deployment inputs actually change; --restart=unless-stopped covers reboots.
+_desired = hashlib.sha256(
+    f"{image} {mem} {java_mem} {opanel['sha256'] if opanel else ''}".encode()
+).hexdigest()
+_pin_file = f"~/.fleet-{node}.pin"
 server.shell(
     name=f"Run {node} server container",
     commands=(
+        f'if [ "$(cat {_pin_file} 2>/dev/null)" = "{_desired}" ] '
+        f'&& [ -n "$(podman ps -q --filter name=^{node}$)" ]; then '
+        f'echo "{node} already up on this pin, not restarting"; exit 0; fi; '
         f"podman rm -f {node} 2>/dev/null || true; "
         f"podman run -d --name {node} --init "
         f"--restart=unless-stopped "
@@ -125,7 +139,8 @@ server.shell(
         f"--network=host "
         f"-v {data_dir}:/data:Z "
         f"-e JAVA_MEMORY={java_mem} "
-        f"{image}"
+        f"{image} "
+        f">/dev/null && echo {_desired} > {_pin_file}"
     ),
 )
 server.shell(
