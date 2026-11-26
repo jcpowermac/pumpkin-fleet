@@ -85,7 +85,7 @@ if ((!DRY_RUN)); then
   [[ -z "$(ls -A "$tmp")" ]] || {
     echo "REFUSE: $device already holds data — nothing copied, $data is untouched." >&2
     echo "        It may hold a partial copy from an aborted run of this script; $data is still the world." >&2
-    echo "        Check it, then empty it by hand if that is what it is: umount $tmp; mount $device $tmp" >&2
+    echo "        Look before you clear it: this script never overwrites a populated volume." >&2
     umount "$tmp"
     exit 1
   }
