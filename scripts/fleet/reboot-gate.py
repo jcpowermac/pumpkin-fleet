@@ -41,9 +41,13 @@ def should_reboot(ping: dict | None) -> bool:
     if ping is None:
         print("reboot allowed: the server is not answering, so nobody is playing")
         return True
-    # A payload without a player count must not raise: an exception here stops every
-    # automatic OS-update reboot on the node, silently.
-    online = (ping.get("players") or {}).get("online", 0)
+    players = ping.get("players")
+    if not isinstance(players, dict) or "online" not in players:
+        # It answered, so it may well be hosting players — unlike an unreachable server.
+        # Skipping is the safe reading; raising here silently stopped every reboot.
+        print("skip: the server answered but reported no player count")
+        return False
+    online = players["online"]
     if online:
         print(f"skip: {online} players online")
         return False

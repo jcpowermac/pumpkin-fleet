@@ -1,3 +1,6 @@
+# Composed, not captured: the ERROR/WARN lines below are built from this task's
+# signature list in Paper's log shape. Do not read them as evidence of what Paper
+# really prints — Task 10 Step 4 checks the patterns against a real log.
 [12:00:00 INFO]: Starting org.bukkit.craftbukkit.Main
 [12:00:00 INFO]: System Info: Java 21 (HotSpot 64-Bit Server VM 21.0.5+11) Host: Linux 6.16.3-101.fc41.x86_64 (amd64)
 [12:00:00 INFO]: Loading properties

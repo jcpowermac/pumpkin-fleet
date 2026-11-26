@@ -217,11 +217,35 @@ _push(
     dest=f"{render_quadlet.FLEET_LIB}/verify-plugins.py",
     sudo=True,
 )
+# An expected list for an image this node no longer runs describes a container that does
+# not exist; the list is deploy-time state, so a redeploy clears the leftovers.
+server.shell(
+    name=f"Remove expected plugin lists of other images",
+    commands=(
+        "find /etc/fleet -maxdepth 1 -name 'expected-plugins.*.txt' "
+        f"! -name 'expected-plugins.{image_name}.txt' -delete"
+    ),
+    _sudo=True,
+)
+_verify_timer, _verify_service = render_quadlet.render_verify_units(node, image_name, data_dir)
 _push(
     name="Install fleet-verify.service",
-    text=render_quadlet.render_verify_unit(node, image_name, data_dir),
+    text=_verify_service,
     dest=f"{render_quadlet.REGISTRY_UNITS}/fleet-verify.service",
     sudo=True,
+)
+_push(
+    name="Install fleet-verify.timer",
+    text=_verify_timer,
+    dest=f"{render_quadlet.REGISTRY_UNITS}/fleet-verify.timer",
+    sudo=True,
+)
+# The timer, not just the deploy-time run: podman-auto-update.timer replaces the container
+# inside core's user manager and nothing else would re-check it.
+server.shell(
+    name="Enable fleet-verify.timer",
+    commands="systemctl daemon-reload && systemctl enable --now fleet-verify.timer",
+    _sudo=True,
 )
 
 # uCore runs firewalld (FedoraServer zone) with only ssh/cockpit open; the container
@@ -257,14 +281,12 @@ server.shell(
     name=f"{node} answers on {ip}:25565",
     commands=f"timeout 2 bash -c 'exec 3<>/dev/tcp/{ip}/25565' || exit 1",
 )
-# Last, because it reads the log of a container that has only just started. The oneshot
-# exits 0 even when it reports failures, so a bad plugin set shows up here and in
-# /run/fleet-verify.status — never as a failed deploy step.
+# Last, because it reads the log of a container that has only just started (the check
+# waits for the server's startup-complete line first). The oneshot exits 0 even when it
+# reports failures, so a bad plugin set shows up here and in /run/fleet-verify.status —
+# never as a failed deploy step.
 server.shell(
     name=f"Check the declared plugins loaded on {node}",
-    commands=(
-        "systemctl daemon-reload && systemctl start fleet-verify.service && "
-        "cat /run/fleet-verify.status"
-    ),
+    commands="systemctl start fleet-verify.service && cat /run/fleet-verify.status",
     _sudo=True,
 )

@@ -36,12 +36,13 @@ def test_unreachable_server_allows_the_reboot(capsys):
     assert "not answering" in capsys.readouterr().out
 
 
-def test_a_status_without_a_player_count_allows_the_reboot(capsys):
-    """A status payload without `players` (or with a null one) must not raise: an
-    exception here silently stops every OS update reboot on the node."""
-    assert reboot_gate.should_reboot({"version": {"name": "Paper", "protocol": 777}}) is True
-    assert reboot_gate.should_reboot({"players": None}) is True
-    assert "reboot allowed" in capsys.readouterr().out
+def test_a_status_without_a_player_count_skips_the_reboot(capsys):
+    """An unreachable server hosts nobody, but one that *answered* and hid its player
+    count may well be hosting players: skip and say so. Raising here silently stopped
+    every OS update reboot on the node, which is not the same thing as allowing it."""
+    assert reboot_gate.should_reboot({"version": {"name": "Paper", "protocol": 777}}) is False
+    assert reboot_gate.should_reboot({"players": None}) is False
+    assert "no player count" in capsys.readouterr().out
 
 
 def test_dry_run_prints_the_decision_and_does_not_reboot():

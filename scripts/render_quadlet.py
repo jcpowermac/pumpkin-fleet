@@ -82,22 +82,38 @@ ExecStart=/usr/bin/python3 {FLEET_LIB}/reboot-gate.py
     return timer, service
 
 
-def render_verify_unit(node: str, image_name: str, data_dir: str) -> str:
-    """The node-side plugin check, started after the node's container unit.
+def render_verify_units(node: str, image_name: str, data_dir: str) -> tuple[str, str]:
+    """Return (timer, service): the node-side plugin check and what re-runs it.
 
     A *system* oneshot because it writes /run/fleet-verify.status and reads /etc/fleet,
-    both root's. The server runs rootless under `core`, so the log is read as core with
-    its runtime dir — a plain `podman logs` as root looks in root's empty podman store.
+    both root's; `After=<node>.service` is what the brief asks for, but the container is a
+    *user* unit, so systemd cannot order across the two managers and the timer is what
+    actually schedules the check. Without it `podman-auto-update.timer` could replace the
+    container with a bad plugin set and /run/fleet-verify.status would keep the `ok` of the
+    last deploy. The server runs rootless under `core`, so the log is read as core with its
+    runtime dir — a plain `podman logs` as root looks in root's empty podman store.
     """
-    return f"""\
+    timer = f"""\
+[Unit]
+Description=pumpkin fleet {node}: re-check that the declared plugins loaded
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=15min
+
+[Install]
+WantedBy=timers.target
+"""
+    service = f"""\
 [Unit]
 Description=pumpkin fleet {node}: did the declared plugins load?
 After={node}.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/python3 {FLEET_LIB}/verify-plugins.py --image {image_name} --data-dir {data_dir} --log-from "sudo -u core env XDG_RUNTIME_DIR=/run/user/1000 podman logs {node}"
+ExecStart=/usr/bin/python3 {FLEET_LIB}/verify-plugins.py --image {image_name} --data-dir {data_dir} --container {node} --log-from "sudo -u core env XDG_RUNTIME_DIR=/run/user/1000 podman logs {node}"
 """
+    return timer, service
 
 
 def handover_command(node: str) -> str:

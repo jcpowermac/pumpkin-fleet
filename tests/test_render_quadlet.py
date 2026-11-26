@@ -156,18 +156,41 @@ def test_handover_is_a_no_op_when_no_container_exists(tmp_path):
 def test_verify_unit_is_a_oneshot_after_the_container_and_reads_the_log_as_core():
     """`After=<node>.service` plus a oneshot: the check runs after the server is up, and
     it never restarts anything (a restart would drop a loaded world)."""
-    text = render_quadlet.render_verify_unit("lobby", "papermc", "/srv/lobby/data")
+    _, text = render_quadlet.render_verify_units("lobby", "papermc", "/srv/lobby/data")
     assert "Type=oneshot" in text
     assert "After=lobby.service" in text
     assert (
         "ExecStart=/usr/bin/python3 /usr/local/lib/fleet/verify-plugins.py "
-        "--image papermc --data-dir /srv/lobby/data" in text
+        "--image papermc --data-dir /srv/lobby/data --container lobby" in text
     )
     # The container is rootless under core; root's own podman store is empty.
     assert 'sudo -u core env XDG_RUNTIME_DIR=/run/user/1000 podman logs lobby' in text
     assert "Restart=" not in text
     assert "podman restart" not in text
     assert "podman rm" not in text
+
+
+def test_verify_unit_is_pointed_at_the_volume_root_the_entrypoint_seeds():
+    """The volume is what the quadlet unit mounts at /data, and the entrypoint seeds
+    /data/plugins (Paper) or /data/mods (Fabric). Handing the check a jar directory makes
+    every healthy node report every jar missing, so it gets the root and reads both."""
+    _, text = render_quadlet.render_verify_units("lobby", "papermc", "/srv/lobby/data")
+    assert "--data-dir /srv/lobby/data " in text
+    assert "/srv/lobby/data/plugins" not in text
+    assert "/srv/lobby/data/mods" not in text
+
+
+def test_verify_timer_rechecks_regularly_and_after_boot():
+    """`podman-auto-update.timer` replaces the container inside core's user manager, so
+    without a timer nobody re-runs the check and /run/fleet-verify.status keeps the `ok`
+    of the last deploy — a stale pass for exactly the failure this check exists for."""
+    timer, _ = render_quadlet.render_verify_units("lobby", "papermc", "/srv/lobby/data")
+    assert "OnBootSec=60" in timer
+    assert "OnUnitActiveSec=15min" in timer
+    assert "WantedBy=timers.target" in timer
+    # A timer activates the service of the same name, so fleet-verify.timer re-runs
+    # fleet-verify.service with no [Timer] Unit= line to get wrong.
+    assert "ExecStart" not in timer
 
 
 def test_canary_is_chosen_by_node_name_and_nothing_else():
