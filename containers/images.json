@@ -132,7 +132,7 @@
     "plugins": [
       {
         "name": "fabric-api",
-        "slug": "FabricMC/fabric",
+        "slug": "FabricMC/fabric-api",
         "source": "github",
         "mc": [
           "26.3"

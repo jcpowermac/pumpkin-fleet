@@ -1,9 +1,10 @@
 # seed_plugins <bundled_dir> <data_dir> <stamp_name>
 #
-# Converge <data_dir>'s jars onto the jars baked into the image, on every start:
-# canonical names from containers/images.json land, a jar already on the volume
-# always wins, and a jar this fleet shipped under a name the image no longer
-# bundles is cleaned up. <data_dir>/.<stamp_name> holds the jar names the fleet last
+# Converge <data_dir>'s jars onto the jars baked into the image, on every start: for a
+# jar name the fleet ships, the image is authoritative — canonical names land and a
+# stale build of one is replaced, so a version bump actually reaches the volume.
+# Anything the fleet never shipped belongs to the operator and is never touched.
+# <data_dir>/.<stamp_name> holds the jar names the fleet last
 # shipped, one per line — it is what separates "we put that there" from "an operator
 # put that there", so only the former is ever deleted.
 #
@@ -39,13 +40,18 @@ seed_plugins() {
     fi
   done
 
-  # Install what is missing. The volume wins on a name it already holds, even if the
-  # bytes differ: a hand-pinned or hot-fixed jar is never replaced under a running tag.
+  # The image is authoritative for the names it ships: install what is absent, and
+  # replace a jar whose bytes differ from the bundled one. Canonical names are stable
+  # across versions, so without this a bump PR changes the image while the volume keeps
+  # the old jar forever.
   for b in "$bundled"/*.jar; do
     if [ -f "$b" ]; then
       bn=$(basename "$b")
       if [ ! -e "$data/$bn" ]; then
         echo "plugins: installing $bn"
+        cp -p "$b" "$data/$bn"
+      elif ! cmp -s "$b" "$data/$bn"; then
+        echo "plugins: replacing $bn (the image ships a different build)"
         cp -p "$b" "$data/$bn"
       fi
     fi

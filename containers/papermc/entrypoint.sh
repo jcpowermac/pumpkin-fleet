@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
-# Converge /data/plugins onto the jars baked into the image before Paper scans it.
+# Converge /data/plugins onto the jars baked into the image before Paper scans it: for a
+# plugin name this image ships, the image is authoritative; a jar under any other name is
+# the operator's.
 . /opt/lib/plugin-seed.sh
 seed_plugins /opt/plugins /data/plugins fleet-plugins
 if [ "${EULA:-false}" = "true" ]; then echo "eula=true" > /data/eula.txt; fi

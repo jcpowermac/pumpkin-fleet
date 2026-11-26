@@ -34,11 +34,11 @@ printf 'viaversion 5.12.3\n' > "$bundled/ViaVersion.jar"
 
 # The volume as an older image left it: the same plugin under its upstream filename,
 # a plugin the fleet shipped and no longer ships, a jar the fleet never shipped, and
-# a hand-pinned jar already sitting on the canonical name.
+# the previous build of a plugin whose canonical name the image still ships.
 printf 'luckperms 5.5.71\n' > "$data/LuckPerms-Bukkit-5.5.71.jar"
 printf 'vault 1.7.3\n' > "$data/Vault.jar"
 printf 'someone elses plugin\n' > "$data/Extra.jar"
-printf 'hand-pinned viaversion\n' > "$data/ViaVersion.jar"
+printf 'viaversion 5.12.2 stale\n' > "$data/ViaVersion.jar"
 printf 'Vault.jar\n' > "$stamp"
 
 # The entrypoints run `set -eu`, so the converge runs under it here too.
@@ -46,9 +46,8 @@ printf 'Vault.jar\n' > "$stamp"
 
 present "$data/LuckPerms.jar" "first_seed_copies_all_canonical_and_writes_stamp: LuckPerms.jar never copied"
 same "$bundled/LuckPerms.jar" "$data/LuckPerms.jar" "first_seed_copies_all_canonical_and_writes_stamp: copied bytes differ"
-printf 'hand-pinned viaversion\n' > "$work/hand-pinned"
-same "$work/hand-pinned" "$data/ViaVersion.jar" "volume_wins: /data/ViaVersion.jar was overwritten"
-present "$data/Extra.jar" "volume_wins: a jar the fleet never shipped was touched"
+same "$bundled/ViaVersion.jar" "$data/ViaVersion.jar" "image_wins_for_a_bundled_name: the volume kept the stale ViaVersion.jar the image no longer ships"
+present "$data/Extra.jar" "operator_owns_it: a jar the fleet never shipped was touched"
 absent "$data/Vault.jar" "removal: Vault.jar was stamped but is no longer bundled, and was left behind"
 absent "$data/LuckPerms-Bukkit-5.5.71.jar" "dedupe: old-named identical jar survived beside the canonical one"
 present "$data/LuckPerms.jar" "dedupe: canonical LuckPerms.jar was removed instead of the duplicate"
@@ -61,6 +60,6 @@ same "$work/expected-stamp" "$stamp" "stamp_after: stamp does not match the sort
 present "$data/LuckPerms.jar" "idempotent: a second converge removed a plugin it just installed"
 present "$data/Extra.jar" "idempotent: a second converge touched a jar the fleet never shipped"
 same "$work/expected-stamp" "$stamp" "idempotent: the stamp changed on a second converge"
-same "$work/hand-pinned" "$data/ViaVersion.jar" "idempotent: the volume's own jar was replaced on a second converge"
+same "$bundled/ViaVersion.jar" "$data/ViaVersion.jar" "idempotent: a second converge replaced a jar it had just installed"
 
 echo "OK: seed_plugins converges a data dir onto the baked plugin set"

@@ -57,10 +57,11 @@ Why one base, and why this one:
    change under a running server.
 4. **Runs as uid/gid 1000**, non-root, so the bind-mounted dataset is the only thing it
    can write.
-5. **Data dirs converge, and the volume always wins.** `lib/plugin-seed.sh` lands the
-   image's plugin jars on the volume at every start, but never replaces a jar already
-   there; it only retires a jar a previous fleet image put there that this one no longer
-   bundles. Everything else on the volume is left alone.
+5. **The image owns the plugin names it ships.** `lib/plugin-seed.sh` installs the image's
+   plugin jars on the volume at every start and replaces a stale build of one, so a bump PR
+   actually reaches the node, and it retires a jar a previous fleet image put there that this
+   one no longer bundles. Anything under a name the fleet does not ship is the operator's —
+   pin a custom build under its own name and nothing touches it.
 
 ## JVM flags
 

@@ -16,9 +16,10 @@ for p in world mods config logs crash-reports; do
   ln -s "/data/$p" "/opt/fabric/$p"
 done
 
-# Converge /data/mods onto the mods baked into the image: canonical names land, a mod
-# the volume already holds is never replaced, and one this image no longer bundles is
-# removed only if a previous fleet image put it there.
+# Converge /data/mods onto the mods baked into the image: for a mod name this image ships,
+# the image is authoritative (a stale build is replaced), a name it stopped bundling is
+# removed only if a previous fleet image put it there, and a mod under any other name is the
+# operator's.
 . /opt/lib/plugin-seed.sh
 seed_plugins /opt/bundled-mods /data/mods fleet-mods
 
