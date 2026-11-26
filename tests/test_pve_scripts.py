@@ -282,6 +282,11 @@ def save():
 
 
 if tool == "mount":
+    if os.environ.get("NODE_MOUNT_FAIL"):
+        # e.g. "wrong fs type, bad option, bad superblock": the device carries no filesystem
+        # because the deploy that was supposed to format it never got there.
+        sys.stderr.write(f"mount: {args[0]}: wrong fs type, bad option, bad superblock\\n")
+        sys.exit(32)
     if mounted(args[1]):
         sys.exit(1)
     mounts.append([args[0], args[1]])
@@ -298,6 +303,11 @@ elif tool == "mountpoint":
             print(f"{directory} is not a mountpoint")
         sys.exit(1)
 elif tool == "systemctl":
+    if "is-active" in args:
+        # 0 active, 3 inactive/unknown — the two answers a real systemctl gives a unit.
+        sys.exit(0 if os.environ.get("NODE_UNIT_ACTIVE") == "1" else 3)
+    if "daemon-reload" in args:
+        sys.exit(0)
     if os.environ.get("NODE_SYSTEMCTL_FAIL"):
         print(f"Job for {args[-1]} failed", file=sys.stderr)
         sys.exit(1)
@@ -334,6 +344,20 @@ class Node:
         self.stub = _stub(self.bin, "hoststub", NODE_STUB)
         for tool in ("mount", "umount", "mountpoint", "systemctl"):
             (self.bin / tool).symlink_to(self.stub)
+        # `sudo -u core env XDG_RUNTIME_DIR=... systemctl --user …` is how the script asks
+        # core's own user manager about the container unit; drop sudo's own arguments and
+        # run the rest, so the stub systemctl answers it.
+        sudo = _stub(
+            self.bin,
+            "sudo",
+            '#!/usr/bin/env python3\n'
+            "import os, sys\n"
+            "args = sys.argv[1:]\n"
+            'if args[:1] == ["-u"]:\n'
+            "    args = args[2:]\n"
+            "os.execvp(args[0], args)\n",
+        )
+        sudo.chmod(0o755)
         self.tmp = self.srv / "lobby" / "data.tmp"
         self.aside = self.srv / "lobby" / "data.pre-zvol"
         self.mounts = root / "node-mounts"
@@ -381,14 +405,15 @@ def test_migration_dry_run_shows_the_commands_and_does_nothing(node):
     assert f"mount {BY_ID}" in out
     assert f"cp -a {node.data}/. " in out
     # Byte-for-byte, not an entry count: equal counts do not mean a faithful copy.
-    assert f"diff -r {node.data} {node.tmp}" in out
+    assert f"diff -r --no-dereference {node.data} {node.tmp}" in out
     assert f"mv {node.data} {node.aside}" in out
     assert "systemctl start srv-lobby-data.mount" in out
     # The preview reads state (that is how it can refuse) and changes nothing.
     assert node.data.joinpath("world", "level.dat").exists()
     assert not (node.srv / "lobby" / "data.pre-zvol").exists()
     assert all(
-        line.startswith("mountpoint ") for line in node.call_log().splitlines()
+        line.startswith("mountpoint ") or "is-active" in line
+        for line in node.call_log().splitlines()
     ), node.call_log()
 
 
@@ -423,9 +448,56 @@ def test_migration_refuses_a_zvol_that_already_holds_data(node):
     result = migrate(node)
     assert result.returncode != 0
     assert "REFUSE" in result.stderr and "already holds data" in result.stderr, result.stderr
+    # The operator has to know the volume may hold half a copy, and that the old tree is
+    # still the world: deleting the zvol's contents is then an informed decision.
+    assert "partial copy from an aborted" in result.stderr, result.stderr
+    assert f"{node.data} is untouched" in result.stderr, result.stderr
     # Nothing was copied and nothing was moved; the old tree is where it was.
     assert (node.data / "world" / "level.dat").exists()
     assert not (node.srv / "lobby" / "data.pre-zvol").exists()
+
+
+def test_migration_refuses_while_the_container_unit_is_still_running(node):
+    """A live server makes the whole sequence a lie: `cp -a` takes a snapshot of a world that
+    is still being written, `diff -r` then passes against that snapshot, and the `mv` moves
+    the directory out from under the live bind mount — the next deploy starts on the older
+    zvol copy and nobody is told."""
+    result = migrate(node, env=node.env() | {"NODE_UNIT_ACTIVE": "1"})
+    assert result.returncode != 0
+    assert "REFUSE" in result.stderr and "lobby.service is running" in result.stderr, result.stderr
+    assert f"systemctl --user stop lobby.service" in result.stderr, result.stderr
+    # Read-only probe only: nothing was mounted, copied or moved.
+    assert node.call_log().splitlines() == [
+        f"mountpoint -q {node.data}",
+        "systemctl --user is-active --quiet lobby.service",
+    ], node.call_log()
+    assert not node.tmp.exists() and not node.aside.exists()
+    assert (node.data / "world" / "level.dat").exists()
+
+
+def test_migration_reloads_systemd_before_it_starts_the_mount_unit(node):
+    """The unit has never been read by systemd (the deploy wrote the file and then refused),
+    so `systemctl start` without a reload fails with `Unit ... not found` — after the tree
+    has already moved, and the failure message then blames the mount."""
+    result = migrate(node)
+    assert result.returncode == 0, result.stderr
+    calls = node.call_log().splitlines()
+    reloads = [i for i, line in enumerate(calls) if line == "systemctl daemon-reload"]
+    starts = [i for i, line in enumerate(calls) if "systemctl start srv-lobby-data.mount" in line]
+    assert reloads and starts, calls
+    assert reloads[-1] == starts[-1] - 1, calls
+
+
+def test_migration_names_a_device_that_does_not_mount(node):
+    """`set -e` used to kill the script at `mount` with an empty exit status; the refusal it
+    was written to print never ran. The device is unformatted exactly when the deploy never
+    got to its format step."""
+    result = migrate(node, env=node.env() | {"NODE_MOUNT_FAIL": "1"})
+    assert result.returncode != 0
+    assert "REFUSE" in result.stderr and "did not mount" in result.stderr, result.stderr
+    assert str(node.data) in result.stderr
+    assert not node.aside.exists()
+    assert (node.data / "world" / "level.dat").exists()
 
 
 def test_migration_unmounts_and_refuses_when_the_copy_is_not_faithful(node):
