@@ -16,6 +16,12 @@
 #
 # Runs on the laptop. Reads pve3 over ssh; the only writes are `zfs create` for a missing
 # zvol and `qm set --scsi1` for a VM that has no scsi1 yet.
+#
+# This is step 1 of the rebuild order — a bare volume attached, nothing copied, and the world
+# is still on `scsi0` when it finishes. Next: `ssh core@<ip> ls /dev/disk/by-id` and set
+# FLEET_DATA_DEV in configs/pins.env to the scsi1 entry (a host zvol is slot-derived there, so
+# nothing else can name it), then the deploy, then 25-migrate-data.sh. Attaching this disk is
+# not migrating onto it, and `20-create-nodes.sh` refuses until the migration is proven.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"

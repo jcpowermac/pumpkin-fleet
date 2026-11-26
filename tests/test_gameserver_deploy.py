@@ -8,6 +8,8 @@ assert on the operations the task actually emits, by executing it against stub p
 modules.
 """
 import base64
+import os
+import subprocess
 import sys
 import types
 from pathlib import Path
@@ -15,6 +17,9 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "scripts"))
+import render_quadlet  # noqa: E402
+
 SSH_HOSTNAMES = {
     "plugins": "10.10.10.55",
     "lobby": "10.10.10.54",
@@ -27,13 +32,20 @@ BY_ID = {
 }
 
 
-def deploy_ops(node: str, blkid: str = "") -> list[tuple[str, dict]]:
+def deploy_ops(
+    node: str, blkid: str = "", pin_dev: str | None = None, by_id: str | None = None
+) -> list[tuple[str, dict]]:
     """The operations the task emits for one node, with its facts stubbed.
 
     `blkid` is what `blkid -o export <device>` reports for the data disk: "" on a device
-    that has never been formatted, the real output once it has.
+    that has never been formatted, the real output once it has. `pin_dev` is
+    `FLEET_DATA_DEV` as configs/pins.env would carry it, and `by_id` the node's own
+    `/dev/disk/by-id` listing (default: one entry naming the node).
     """
     ops: list[tuple[str, dict]] = []
+    if pin_dev is not None:
+        real_pin = render_quadlet.pin
+        render_quadlet.pin = lambda key: pin_dev if key == "FLEET_DATA_DEV" else real_pin(key)
 
     pyinfra = types.ModuleType("pyinfra")
 
@@ -45,7 +57,7 @@ def deploy_ops(node: str, blkid: str = "") -> list[tuple[str, dict]]:
         def get_fact(fact, **kwargs):
             command = kwargs["command"]
             if command.startswith("ls "):
-                return BY_ID[node]
+                return BY_ID[node] if by_id is None else by_id
             if command.startswith("sudo blkid"):
                 return blkid
             raise AssertionError(f"no fact recorded for {command}")
@@ -81,6 +93,8 @@ def deploy_ops(node: str, blkid: str = "") -> list[tuple[str, dict]]:
                 sys.modules.pop(name, None)
             else:
                 sys.modules[name] = module
+        if pin_dev is not None:
+            render_quadlet.pin = real_pin
     return ops
 
 
@@ -233,7 +247,54 @@ def test_the_mounted_device_must_be_the_one_the_unit_names():
     check = next(
         c for c in commands(deploy_ops("plugins")) if "findmnt -no SOURCE /srv/plugins/data" in c
     )
-    assert f'[ "$src" = "{DATA_DEV}" ]' in check, check
+    assert f"readlink -f {DATA_DEV}" in check, check
+
+
+def run_device_check(tmp_path, findmnt_source: str, unit_device_resolves_to: str):
+    """Run the emitted findmnt check under bash, with the node's resolution faked.
+
+    `findmnt -no SOURCE` prints what the kernel resolved — a `/dev/zd96`, not the by-id path
+    the unit names — so a string comparison between the two fails on every healthy node.
+    """
+    check = next(
+        c for c in commands(deploy_ops("plugins")) if "findmnt -no SOURCE /srv/plugins/data" in c
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    (bin_dir / "findmnt").write_text('#!/bin/sh\necho "$FINDMNT_SOURCE"\n')
+    # `readlink -f <the unit's by-id path>` is the one the stub answers differently.
+    (bin_dir / "readlink").write_text(
+        '#!/bin/sh\ncase "$2" in */by-id/*) echo "$UNIT_RESOLVES_TO" ;; *) echo "$2" ;; esac\n'
+    )
+    (bin_dir / "mountpoint").write_text("#!/bin/sh\nexit 0\n")
+    for script in bin_dir.iterdir():
+        script.chmod(0o755)
+    return subprocess.run(
+        ["/bin/bash", "-c", check],
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "FINDMNT_SOURCE": findmnt_source,
+            "UNIT_RESOLVES_TO": unit_device_resolves_to,
+        },
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+def test_a_kernel_resolved_source_is_the_same_device(tmp_path):
+    """`/dev/zd96` vs `/dev/disk/by-id/…` is the same disk; comparing the strings would fail
+    a healthy node's deploy fleet-wide (loudly, but for the wrong reason)."""
+    result = run_device_check(tmp_path, "/dev/zd96", "/dev/zd96")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_a_mount_from_another_device_is_still_refused(tmp_path):
+    """Resolving both sides must not turn the check into a rubber stamp."""
+    refused = run_device_check(tmp_path, "/dev/zd96", "/dev/zd97")
+    assert refused.returncode != 0, refused.stdout
+    assert "not the disk the unit names" in refused.stdout, refused.stdout
 
 
 def test_a_node_without_opanel_closes_the_port_its_old_image_opened():
@@ -242,6 +303,10 @@ def test_a_node_without_opanel_closes_the_port_its_old_image_opened():
     papermc = commands(deploy_ops("plugins"))
     assert any("--remove-port=3000/tcp" in c for c in papermc), papermc
     assert not any("--add-port=3000/tcp" in c for c in papermc), papermc
+    # Proved before it is removed, and a zone that never had the port is not a failed deploy.
+    close = next(c for c in papermc if "--remove-port=3000/tcp" in c)
+    assert close.index("--query-port=3000/tcp") < close.index("--remove-port=3000/tcp"), close
+    assert close.endswith("|| true"), close
     fabric = commands(deploy_ops("vanilla"))
     assert any("--add-port=3000/tcp" in c for c in fabric), fabric
     assert not any("--remove-port=3000/tcp" in c for c in fabric), fabric
@@ -255,6 +320,39 @@ def test_the_deploy_asserts_the_mount_is_active_before_it_starts_the_container()
     started = next(i for i, c in enumerate(ops) if "--user start plugins.service" in c)
     assert asserted < started, ops
     assert "generate a new world" in ops[asserted]
+
+
+def test_an_inactive_unit_reports_its_condition_and_the_mount_state_together():
+    """`start` on a unit whose Condition* is unmet does not fail — it *skips*, and the deploy
+    used to end green over a server that never started. So after the start, an inactive unit
+    is a failure that hands the operator the condition and the mount state at once."""
+    ops = commands(deploy_ops("plugins"))
+    started = next(i for i, c in enumerate(ops) if "systemctl --user start plugins.service" in c)
+    diagnosed = next(
+        i for i, c in enumerate(ops) if "is-active --quiet plugins.service" in c and "Condition" in c
+    )
+    assert started < diagnosed, ops
+    command = ops[diagnosed]
+    assert "srv-plugins-data.mount" in command, command
+    assert "mountpoint -q /srv/plugins/data" in command, command
+    assert "journalctl --user -u plugins.service" in command, command
+    assert command.rstrip().endswith("exit 1"), command
+
+
+def test_the_pin_is_used_verbatim_when_no_by_id_entry_names_the_node():
+    """A host zvol's guest name is slot-derived (`…HARDDISK_drive-scsi1`), which no
+    node-name match can recognise: the operator's pin is what the mount unit must name."""
+    slot = "scsi-0QEMU_QEMU_HARDDISK_drive-scsi1"
+    pinned = deploy_ops(
+        "plugins",
+        pin_dev=f"/dev/disk/by-id/{slot}",
+        by_id=f"scsi-0QEMU_QEMU_HARDDISK_drive-scsi0\n{slot}\n",
+    )
+    unit = pushed(pinned, "/etc/systemd/system/srv-plugins-data.mount")
+    assert f"What=/dev/disk/by-id/{slot}" in unit, unit
+    assert f"test -b /dev/disk/by-id/{slot} && sudo mkfs.xfs /dev/disk/by-id/{slot}" in commands(
+        pinned
+    )
 
 
 def test_the_deploy_fails_when_the_volume_is_not_mounted():

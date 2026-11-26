@@ -7,11 +7,15 @@ so this is the half that decides *when* the new deployment becomes the running o
 
 A server that is not answering does NOT block the reboot: a dead container is not
 hosting players, and blocking would wedge the node on a crashed server until a human
-noticed. The cost of that choice: if the container is down because it crashed, the
-reboot takes the crash evidence (the journal's podman logs survive, the container
-does not) with it, and nothing here restarts or reports the server — the reboot is
-allowed, the container comes back with the unit, and the crash is only visible as
-`podman ps -a` state plus logs from before the reboot.
+noticed. "Not answering" means silence only: an answer that carries no readable player
+count — including one mc-ping could not parse at all — blocks, because that server may
+well be hosting players (the two files share this one rule).
+
+The cost of that choice: if the container is down because it crashed, the reboot takes
+the crash evidence (the journal's podman logs survive, the container does not) with it,
+and nothing here restarts or reports the server — the reboot is allowed, the container
+comes back with the unit, and the crash is only visible as `podman ps -a` state plus
+logs from before the reboot.
 
 Usage: reboot-gate.py [--dry-run]   # --dry-run prints the decision, never reboots
 """
@@ -21,10 +25,11 @@ import subprocess
 import sys
 
 MC_PING = "/usr/local/lib/fleet/mc-ping.py"
+UNPARSEABLE = 2   # mc-ping.py: the server answered, but the payload was not a JSON object
 
 
 def ping() -> dict | None:
-    """The status ping's JSON, or None when the server does not answer in time."""
+    """The status ping's JSON, {} when it answered unparseably, None when it never answered."""
     try:
         out = subprocess.run(
             [sys.executable, MC_PING, "127.0.0.1", "25565"],
@@ -32,6 +37,10 @@ def ping() -> dict | None:
             text=True,
             timeout=30,
         )
+        # An unparseable answer is still an answer: {} has no player count, which
+        # should_reboot() reads as "may be hosting players, skip".
+        if out.returncode == UNPARSEABLE:
+            return {}
         return json.loads(out.stdout) if out.returncode == 0 else None
     except (subprocess.TimeoutExpired, json.JSONDecodeError):
         return None

@@ -321,6 +321,12 @@ network path — 202 just needs its container and its firewalld port, which is w
 1. `configs/pins.env`: OS channel `pumpkin-os:stable`, FCOS import build pinned, node VMIDs/IPs as today.
 2. `scripts/fleet/15-ensure-data-disks.sh` → create `pool/mcdata/<node>` and attach it as `scsi1` to the node **that is
    still running** (§2b). Read-only decision pass first: it refuses rather than detach a `scsi1` that is something else.
+   Then `ssh core@<ip> ls /dev/disk/by-id` and set `FLEET_DATA_DEV=/dev/disk/by-id/<the scsi1 entry>` in
+   `configs/pins.env`. The guest name for a host zvol is slot-derived (`…HARDDISK_drive-scsi1`), so the pin is the only
+   way the deploy can name the device — and it must be set **before** step 3, which writes the `.mount` unit that step 4
+   reads its device out of. One value for the fleet: `scsi1` is the world disk on every node.
+   If the guest does not see the hot-plugged disk (step 3 then fails on `test -b`), `qm shutdown <vmid> && qm start
+   <vmid>` and re-run — `qm destroy` is never the fix for an invisible disk.
 3. `uv run pyinfra inventory/hosts.py --limit <node> tasks/gameserver.py` → writes
    `/etc/systemd/system/srv-<node>-data.mount`, formats the zvol if it is blank, and then **refuses** a
    `/srv/<node>/data` that holds data and is not mounted yet. That refusal is the expected outcome of this step; the
@@ -329,10 +335,15 @@ network path — 202 just needs its container and its firewalld port, which is w
    move the original to `/srv/<node>/data.pre-zvol` (never deleted), mount the zvol at the real path.
 5. `tasks/gameserver.py` again for that node → the volume is mounted, so it proceeds (ownership, container start).
 6. `scripts/fleet/20-create-nodes.sh` → **only now** destroys and re-imports the VM. It refuses the whole run, read-only,
-   if any node's `scsi1` is not `/dev/zvol/pool/mcdata/<node>` — a world still on `scsi0` goes with `--purge`. It
-   destroys `scsi0` and nothing else, re-imports the pinned qcow2, and re-attaches the host-owned zvol; each node
-   rebases to `pumpkin-os:stable` on first boot (~5–10 min, already the proven path).
-7. `tasks/gameserver.py` for all four again: the mount unit names a device path that only exists after the recreate.
+   for either of two reasons, naming every offender: a node whose `scsi1` is not `/dev/zvol/pool/mcdata/<node>` (a world
+   still on `scsi0` goes with `--purge`), or a node whose world is not *proven* to be on that zvol — proven meaning
+   `/srv/<node>/data` is a mountpoint, or a finished step 4 left `/srv/<node>/data.pre-zvol` behind. Attaching the zvol
+   (step 2) is not migrating onto it (step 4), so the two are checked separately. It destroys `scsi0` and nothing else,
+   re-imports the pinned qcow2, and re-attaches the host-owned zvol; each node rebases to `pumpkin-os:stable` on first
+   boot (~5–10 min, already the proven path).
+7. `uv run pyinfra inventory/hosts.py --group game_nodes tasks/gameserver.py` for all four again: the mount unit names a
+   device path that only exists after the recreate, and every rebuilt node needs the mount, the ownership and the
+   container from this step before its server is answering.
 8. Verify: unit active, image digest matches `stable`, declared plugins loaded, mc-ping answers.
 9. OS updates then happen by themselves (§4); plugin updates only by merged bump PR (§6).
 

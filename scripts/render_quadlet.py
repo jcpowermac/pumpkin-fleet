@@ -35,9 +35,13 @@ def render_container_unit(
     # ConditionPathIsMountPoint is emitted in [Unit], which quadlet copies into the unit it
     # generates: a boot with the zvol missing or renamed then leaves the container stopped
     # instead of bind-mounting a plain directory on the OS disk and generating a new world.
-    # It is a *user* unit, so this is a heuristic unless quadlet really passes the key
-    # through (podman-systemd.unit(5) documents [Unit] keys as copied, but the generator is
-    # not exercised offline) — the deploy's `systemctl is-active <mount>` is the shipped guard.
+    # UNPROVEN UNTIL THE CANARY: podman-systemd.unit(5) documents [Unit] keys as copied, but
+    # the generator is not exercised offline, and nothing here can prove a user manager
+    # evaluates the key. A failed Condition* *skips* the start with no retry, so the deploy
+    # could not see it if it were skipped — hence the deploy-side check after `start`, which
+    # reports the condition and the mount state together when the unit comes back inactive.
+    # `Before=user@1000.service` on the mount unit (scripts/fleet/mount.py) is what keeps the
+    # mount ahead of the user manager at boot, so the condition should never fire at all.
     return f"""\
 [Unit]
 Description=pumpkin fleet {node} ({image}:{channel})

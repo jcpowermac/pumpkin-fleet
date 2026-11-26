@@ -135,9 +135,11 @@ server.shell(
         f"findmnt -T {data_dir}; exit 1; }}; "
         # The unit file can be rewritten while the active mount stays on the previous device
         # (renamed by-id path, a pin that moved): the deploy would report success and the node
-        # would come back on the wrong disk at the next boot.
-        f"src=$(findmnt -no SOURCE {data_dir}) || exit 1; "
-        f'[ "$src" = "{device}" ] || {{ echo "{data_dir} is mounted from $src, not {device} — "'
+        # would come back on the wrong disk at the next boot. Both sides are resolved first:
+        # `findmnt` prints what the kernel did (/dev/zdN), not the by-id path the unit names.
+        f"src=$(readlink -f \"$(findmnt -no SOURCE {data_dir})\") || exit 1; "
+        f"[ \"$src\" = \"$(readlink -f {device})\" ] || "
+        f'{{ echo "{data_dir} is mounted from $src, not {device} — "'
         f'"the active mount is not the disk the unit names; a reboot would move the world"; exit 1; }}'
     ),
 )
@@ -245,6 +247,22 @@ server.shell(
     name=f"Start {node}.service",
     commands=f"systemctl --user daemon-reload && systemctl --user start {node}.service",
 )
+# `start` does not fail when the unit's Condition* is unmet — it *skips*, silently and with
+# no retry, so a deploy that started a skipped unit ended green over a server that never came
+# up. Ask the user manager what happened and hand over the condition and the mount state.
+server.shell(
+    name=f"{node}.service is active after start, or say why not",
+    commands=(
+        f"systemctl --user is-active --quiet {node}.service && exit 0; "
+        f"echo '{node}.service is inactive after start — its condition and {data_unit} are:'; "
+        f"systemctl --user show -p ConditionPathIsMountPoint -p ConditionResult "
+        f"-p ActiveState {node}.service; "
+        f"mountpoint -q {data_dir} && echo 'mount: {data_dir} is a mountpoint' "
+        f"|| echo 'mount: {data_dir} is NOT a mountpoint — the unit was skipped by its "
+        f"ConditionPathIsMountPoint'; "
+        f"journalctl --user -u {node}.service -n 20 --no-pager || true; exit 1"
+    ),
+)
 # The timer ships at both system and user level; the user one is the one that matches
 # rootless quadlets. It compares the local digest with what the channel tag now points
 # at, pulls, and restarts the unit.
@@ -323,10 +341,16 @@ if opanel:
     )
 else:
     # lobby ran the OPanel image before papermc. The permanent rule survived that change and
-    # nothing listens on 3000 now, so the deploy closes it; removing an absent port is a no-op.
+    # nothing listens on 3000 now, so the deploy closes it — proved with --query-port first,
+    # because a zone that never had the port is not a failed deploy (the `|| true` covers the
+    # query itself saying no).
     server.shell(
         name="Close 3000/tcp (this image has no OPanel) in firewalld",
-        commands="firewall-cmd --remove-port=3000/tcp --permanent && firewall-cmd --reload",
+        commands=(
+            "firewall-cmd --query-port=3000/tcp --permanent "
+            "&& firewall-cmd --remove-port=3000/tcp --permanent "
+            "&& firewall-cmd --reload || true"
+        ),
         _sudo=True,
     )
 # After the firewall rule, not before: the probe hits this node's own host address, which

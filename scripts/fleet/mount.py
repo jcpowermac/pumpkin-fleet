@@ -30,6 +30,17 @@ def data_device(node: str, by_id_listing: str, fallback: str) -> str:
         if matches_node.search(entry.lower()):
             return f"{BY_ID}/{entry}"
     if fallback:
+        # The pin is the operator's positive statement about this fleet, so it is trusted as
+        # written — but only as far as "this node lists that device". A host zvol shows up as
+        # a slot-derived name (`…HARDDISK_drive-scsi1`), which is exactly why the pin exists.
+        entry = fallback.rsplit("/", 1)[-1]
+        if not fallback.startswith(f"{BY_ID}/") or entry not in by_id_listing.split():
+            raise ValueError(
+                f"FLEET_DATA_DEV={fallback} is not a device on {node}: it must be an absolute "
+                f"path under {BY_ID} and appear in `ls /dev/disk/by-id` on the node. That "
+                f"listing has: {by_id_listing.split() or 'nothing'}. Refusing to mount a disk "
+                "that is not there (a typo here formats or mounts the wrong volume)."
+            )
         return fallback
     raise ValueError(
         f"no {BY_ID} entry for {node} (the zvol pool/mcdata/{node}) and FLEET_DATA_DEV is "
@@ -63,9 +74,14 @@ def mount_unit(node: str, device: str) -> str:
     `srv-<node>-data.mount`: under any other name systemd ignores it, the mount never
     happens, and the container writes the world onto the OS disk.
     """
+    # Before=user@1000.service: the container unit is core's user unit and both are siblings
+    # under multi-user.target, so without this the mount can come up *after* the user manager
+    # started the container — where its ConditionPathIsMountPoint skips the start with no
+    # retry. A system unit may order before a user manager; the reverse is impossible.
     return f"""\
 [Unit]
 Description=pumpkin fleet {node}: Minecraft data (host-owned zvol, not the OS disk)
+Before=user@1000.service
 
 [Mount]
 What={device}

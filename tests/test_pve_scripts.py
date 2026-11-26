@@ -26,6 +26,8 @@ import mount  # noqa: E402
 
 NODES = [("201", "lobby"), ("202", "plugins"), ("203", "vanilla"), ("204", "neoforge")]
 BY_ID = "/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_lobby"
+# What a guest really sees for a host zvol attached as scsi1: slot-derived, no node name.
+SLOT = "scsi-0QEMU_QEMU_HARDDISK_drive-scsi1"
 
 
 def _stub(bin_dir: Path, name: str, text: str) -> Path:
@@ -54,6 +56,8 @@ argv = sys.argv[1:]
 with open(os.environ["PVE_CALLS"], "a") as log:
     log.write(" ".join(argv) + "\\n")
 state = json.loads(open(os.environ["PVE_STATE"]).read())
+while argv[:1] == ["-o"]:      # ssh options, e.g. -o BatchMode=yes, precede the host
+    argv = argv[2:]
 command = argv[1:]
 datasets, vms = state["datasets"], state["vms"]
 
@@ -100,6 +104,13 @@ elif command[:2] == ["qm", "set"]:
         sys.exit(1)
     vms[vmid][key] = value
     save()
+elif command[:1] and command[0].startswith("mountpoint -q /srv/"):
+    # `ssh core@<ip> "mountpoint -q /srv/<node>/data || test -d /srv/<node>/data.pre-zvol"`:
+    # the pre-flight's evidence that this node's world already lives on its zvol.
+    node = command[0].split("/srv/", 1)[1].split("/", 1)[0]
+    if node in state.get("mounted", []) or node in state.get("pre_zvol", []):
+        sys.exit(0)
+    sys.exit(1)
 elif command[:1] == ["mkdir"]:
     pass                      # `ssh pve3 mkdir -p /var/coreos/snippets`
 elif command[:1] == ["pct"]:
@@ -129,6 +140,9 @@ class Pve:
             {
                 "datasets": [],
                 "vms": {vmid: {"scsi0": f"pool:vm-{vmid}-disk-0"} for vmid, _ in NODES},
+                # Which nodes have proven their world is on the zvol (the node-side probe).
+                "mounted": [],
+                "pre_zvol": [],
             }
         )
         self.calls.write_text("")
@@ -238,6 +252,11 @@ def test_mount_unit_paths():
     assert "Where=/srv/lobby/data" in unit
     assert "Type=xfs" in unit
     assert "fstab" not in unit
+    # Both units are siblings under multi-user.target, so on a cold boot the mount can come
+    # up *after* core's user manager generated and started the container — where the
+    # container's ConditionPathIsMountPoint skips the start with no retry.
+    assert "Before=user@1000.service" in unit.split("[Mount]")[0]
+    assert "WantedBy=multi-user.target" in unit
 
 
 def test_blank_device_formats_and_used_device_does_not():
@@ -258,16 +277,37 @@ def test_blank_device_formats_and_used_device_does_not():
 def test_the_device_is_never_guessed():
     listing = "scsi-0QEMU_QEMU_HARDDISK_drive-scsi0\nscsi-0QEMU_QEMU_HARDDISK_lobby\nwwn-0x5000"
     assert mount.data_device("lobby", listing, "/dev/pin") == BY_ID
-    # No entry names the node: fall back to the pin, not to the first disk in the listing.
-    assert mount.data_device("lobby", "scsi-0QEMU_QEMU_HARDDISK_drive-scsi1\n", "/dev/pin") == "/dev/pin"
     # A by-id name that merely embeds the node name is not this node's disk: the match is
     # anchored to a delimiter, so the pin wins instead.
-    assert mount.data_device("lobby", "scsi-0QEMU_QEMU_HARDDISK_blobby\n", "/dev/pin") == "/dev/pin"
-    assert mount.data_device("lobby", "scsi-0QEMU_QEMU_HARDDISK_lobby2\n", "/dev/pin") == "/dev/pin"
+    decoy = "scsi-0QEMU_QEMU_HARDDISK_blobby\nscsi-0QEMU_QEMU_HARDDISK_lobby2\n" + SLOT
+    assert mount.data_device("lobby", decoy, f"/dev/disk/by-id/{SLOT}") == f"/dev/disk/by-id/{SLOT}"
     with pytest.raises(ValueError) as refused:
-        mount.data_device("lobby", "scsi-0QEMU_QEMU_HARDDISK_drive-scsi1\n", "")
+        mount.data_device("lobby", SLOT + "\n", "")
     assert "FLEET_DATA_DEV" in str(refused.value)
     assert "lobby" in str(refused.value)
+
+
+def test_the_pin_is_trusted_for_a_slot_derived_name():
+    """A host zvol shows up in the guest as a slot-derived name (`…HARDDISK_drive-scsi1`),
+    which no anchored node-name match can recognise. The pin is the operator's positive
+    statement about this fleet, so it is used as written."""
+    listing = f"scsi-0QEMU_QEMU_HARDDISK_drive-scsi0\n{SLOT}\n"
+    assert mount.data_device("lobby", listing, f"/dev/disk/by-id/{SLOT}") == f"/dev/disk/by-id/{SLOT}"
+    assert mount.data_device("neoforge", listing, f"/dev/disk/by-id/{SLOT}") == f"/dev/disk/by-id/{SLOT}"
+
+
+def test_a_pin_that_names_no_device_on_this_node_fails_loudly():
+    """A typo or a disk that was never attached: returning the pin anyway would surface
+    much later, as `test -b` failing in the middle of the format op."""
+    listing = f"scsi-0QEMU_QEMU_HARDDISK_drive-scsi0\n{SLOT}\n"
+    with pytest.raises(ValueError) as refused:
+        mount.data_device("lobby", listing, "/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi2")
+    assert "drive-scsi2" in str(refused.value) and "drive-scsi1" in str(refused.value)
+    with pytest.raises(ValueError):
+        # Not an absolute path: a unit's What= cannot use it, so it is a mistake, not a pin.
+        mount.data_device("lobby", listing, SLOT)
+    with pytest.raises(ValueError):
+        mount.data_device("lobby", "", f"/dev/disk/by-id/{SLOT}")
 
 
 # --- the migration onto the zvol ----------------------------------------------------------
@@ -354,9 +394,9 @@ class Node:
         (self.data / "server.properties").write_text("motd=pumpkin\n")
         self.etc = root / "etc"
         self.etc.mkdir()
-        (self.etc / "srv-lobby-data.mount").write_text(
-            f"[Mount]\nWhat={BY_ID}\nWhere=/srv/lobby/data\nType=xfs\n"
-        )
+        # The real rendered unit, not a hand-written stand-in: the node's systemd state has to
+        # be what the deploy writes, or the fixture can drift from the thing under test.
+        (self.etc / "srv-lobby-data.mount").write_text(mount.mount_unit("lobby", BY_ID))
         self.bin = root / "bin"
         self.bin.mkdir()
         self.stub = _stub(self.bin, "hoststub", NODE_STUB)
@@ -740,6 +780,22 @@ def create_nodes(pve: Pve, root: Path) -> subprocess.CompletedProcess:
     )
 
 
+def test_create_nodes_probe_is_read_only_and_batched(pve, tmp_path):
+    """The proof is one read-only question per node, asked before anything is touched; a
+    probe that cannot be answered non-interactively must refuse, not sit at a prompt."""
+    state = pve.read_state()
+    for vmid, node in NODES:
+        state["vms"][vmid]["scsi1"] = f"/dev/zvol/pool/mcdata/{node}"
+    state["mounted"] = [node for _, node in NODES]
+    pve.write_state(state)
+    assert create_nodes(pve, tmp_path).returncode == 0
+    probes = [line for line in pve.call_log().splitlines() if "mountpoint -q /srv/" in line]
+    assert len(probes) == len(NODES), probes
+    for line in probes:
+        assert line.startswith("-o BatchMode=yes core@10.10.10."), line
+        assert "data.pre-zvol" in line, line
+
+
 def test_create_nodes_refuses_the_run_before_any_vm_when_a_world_is_still_on_scsi0(pve, tmp_path):
     """The order was a comment, and a per-node check would destroy 201 and only then find
     that 203's world never left its OS disk. So every node is decided first, read-only, and
@@ -759,10 +815,53 @@ def test_create_nodes_refuses_the_run_before_any_vm_when_a_world_is_still_on_scs
     assert "scp " not in log, "an Ignition was pushed for a run that cannot be safe"
 
 
+def test_create_nodes_refuses_a_node_whose_world_is_not_proven_on_its_zvol(pve, tmp_path):
+    """`15-ensure-data-disks.sh` attaches a *bare* zvol and never migrates, so "scsi1 is the
+    host zvol" is not evidence that the world left scsi0. Without a second proof, step 1 of
+    the runbook (advertised as idempotent and safe) followed by this script deletes a world."""
+    state = pve.read_state()
+    for vmid, node in NODES:
+        state["vms"][vmid]["scsi1"] = f"/dev/zvol/pool/mcdata/{node}"
+    # Attached, but only 203 has ever been migrated: the other three worlds are on scsi0.
+    state["mounted"] = ["vanilla"]
+    pve.write_state(state)
+
+    result = create_nodes(pve, tmp_path)
+    assert result.returncode != 0, result.stdout
+    err = result.stderr
+    assert "REFUSE" in err, err
+    for vmid, node in NODES:
+        if node == "vanilla":
+            assert f"{vmid} ({node})" not in err, err
+        else:
+            assert f"{vmid} ({node})" in err, err
+    # The refusal says what it proved and what it could not, and names the way forward.
+    assert "25-migrate-data.sh" in err and "FLEET_DATA_DEV" in err, err
+    log = pve.call_log()
+    assert "qm destroy" not in log and "qm stop" not in log and "qm create" not in log, log
+    assert "heredoc" not in log and "scp " not in log, log
+
+
+def test_create_nodes_accepts_a_migrated_node_that_is_not_mounted_yet(pve, tmp_path):
+    """25-migrate-data.sh moves the old tree to data.pre-zvol and then starts the mount; a
+    migration whose mount step has not run yet is still a world that is on the zvol."""
+    state = pve.read_state()
+    for vmid, node in NODES:
+        state["vms"][vmid]["scsi1"] = f"/dev/zvol/pool/mcdata/{node}"
+    state["mounted"] = ["lobby", "plugins", "neoforge"]
+    state["pre_zvol"] = ["vanilla"]
+    pve.write_state(state)
+
+    result = create_nodes(pve, tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert pve.call_log().count("qm destroy $VMID --purge") == len(NODES)
+
+
 def test_create_nodes_destroys_once_every_node_is_on_its_host_zvol(pve, tmp_path):
     state = pve.read_state()
     for vmid, node in NODES:
         state["vms"][vmid]["scsi1"] = f"/dev/zvol/pool/mcdata/{node}"
+    state["mounted"] = [node for _, node in NODES]
     pve.write_state(state)
 
     result = create_nodes(pve, tmp_path)
@@ -785,12 +884,17 @@ def test_create_nodes_owns_the_snippets_dir_and_attaches_data_disks():
     cursor = 0
     for step in (
         "15-ensure-data-disks.sh",
+        "FLEET_DATA_DEV",
         "tasks/gameserver.py",
         "25-migrate-data.sh <node>",
         "tasks/gameserver.py",
         "THIS SCRIPT",
     ):
         cursor = order.index(step, cursor)  # ValueError = the order is not written down
+    # The pin comes before the deploy, not after the destroy: without it the deploy aborts
+    # resolving the device, writes no mount unit, and 25-migrate-data.sh then refuses — so
+    # the "expected refusal" this header promises can never be reached.
+    assert "qm shutdown" in order, "the hot-plug remedy (shutdown/start, never destroy) is unstated"
 
     assert "qm destroy \\$VMID --purge" in script
     assert "survives qm destroy --purge" in script

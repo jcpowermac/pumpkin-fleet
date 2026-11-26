@@ -20,19 +20,33 @@
 # zvol yet goes with it. On node 201 that is the situation today (`scsi0` is
 # pool:vm-201-disk-0 and the world is on it). The order is now ENFORCED, not advised: the
 # read-only pre-flight before the loop refuses the whole run if any node's scsi1 is not its
-# host-owned zvol. Run, in this order:
+# host-owned zvol, or if the world is not *proven* to be on that zvol already. Run, in this
+# order:
 #
 #   1. scripts/fleet/15-ensure-data-disks.sh       create pool/mcdata/<node> and attach
 #                                                  scsi1 to the node that is STILL RUNNING
-#   2. pyinfra … tasks/gameserver.py               writes the .mount unit, then refuses a
-#                                                  /srv/<node>/data that is not mounted yet
-#   3. scripts/fleet/25-migrate-data.sh <node>     on the node: copy the old tree onto the
+#   2. ssh core@<ip> ls /dev/disk/by-id            read the name the guest sees for scsi1, then
+#      configs/pins.env: FLEET_DATA_DEV=/dev/disk/by-id/<entry>    set the pin to it
+#   3. pyinfra … tasks/gameserver.py               writes the .mount unit, formats the blank
+#                                                  zvol, then refuses a /srv/<node>/data
+#                                                  that is not mounted yet
+#   4. scripts/fleet/25-migrate-data.sh <node>     on the node: copy the old tree onto the
 #                                                  zvol, then move it to data.pre-zvol
-#   4. pyinfra … tasks/gameserver.py               mounts it, ownership, container starts
-#   5. THIS SCRIPT                                 only now may a VM be destroyed
+#   5. pyinfra … tasks/gameserver.py               mounts it, ownership, container starts
+#   6. THIS SCRIPT                                 only now may a VM be destroyed
+#   7. pyinfra … --group game_nodes                after the rebase, for all four
 #
-# Steps 1-2 and 4 are idempotent, so repeat them freely; step 3 refuses when the old tree is
-# empty, the zvol already holds data, or the node's container is still running; step 5 is the
+# Step 2 is not style: a host zvol's guest name is slot-derived (…HARDDISK_drive-scsi1), which
+# no node-name match can recognise, so without the pin step 3 aborts before it writes the
+# mount unit and step 4 then refuses with "deploy first" — the "expected refusal" step 3
+# promises is never reached. One pin covers the fleet: scsi1 is the world disk on every node.
+#
+# If the freshly hot-plugged scsi1 is invisible to the guest, step 3's format op fails on
+# `test -b`: `qm shutdown <vmid> && qm start <vmid>`, then re-run it. `qm destroy` is never
+# the fix for an invisible disk — it is the one command here that can lose the world.
+#
+# Steps 1-3 and 5 are idempotent, so repeat them freely; step 4 refuses when the old tree is
+# empty, the zvol already holds data, or the node's container is still running; step 6 is the
 # only irreversible one.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -83,12 +97,26 @@ done
   || { echo "CANARY_NODE=$CANARY_NODE matches no node in this list (lobby plugins vanilla neoforge)" >&2; exit 1; }
 
 # The decision pass: is every world already on its host-owned zvol? Read-only (`qm status`,
-# `qm config`) and every node decided before any VM is touched — a check inside the loop
-# would destroy 201 and only then discover that 203's world never left its OS disk.
-# A node with no VM has nothing to lose; a node whose scsi1 is not /dev/zvol/pool/mcdata/<node>
-# still has its world on the disposable scsi0, and destroying it is how a world is lost.
+# `qm config`, and one node-side probe) and every node decided before any VM is touched — a
+# check inside the loop would destroy 201 and only then discover that 203's world never left
+# its OS disk. A node with no VM has nothing to lose; a node whose scsi1 is not
+# /dev/zvol/pool/mcdata/<node> still has its world on the disposable scsi0.
+#
+# A zvol *attached* is not a world *migrated*: 15-ensure-data-disks.sh attaches a bare volume
+# and copies nothing, so the two tests are separate. The proof for the second one lives on the
+# node — /srv/<node>/data is a mountpoint, or a finished 25-migrate-data.sh left
+# data.pre-zvol behind (its mount step not run yet). Anything else, including a node that does
+# not answer, is unproven and refuses.
+order_hint() {
+  echo "        Move each world onto its zvol first, one node at a time, in this order:" >&2
+  echo "          1. scripts/fleet/15-ensure-data-disks.sh" >&2
+  echo "          2. ssh core@<ip> ls /dev/disk/by-id   # set FLEET_DATA_DEV in configs/pins.env to its scsi1 entry" >&2
+  echo "          3. uv run pyinfra inventory/hosts.py --limit <node> tasks/gameserver.py  # writes the .mount unit, then refuses" >&2
+  echo "          4. scripts/fleet/25-migrate-data.sh <node>                              # on the node, server stopped" >&2
+  echo "          5. uv run pyinfra inventory/hosts.py --limit <node> tasks/gameserver.py  # mounts it, starts the container" >&2
+}
 if ((!RENDER_ONLY)); then
-  unsafe=()
+  unsafe=(); unproven=()
   for entry in "${NODES[@]}"; do
     IFS=: read -r vmid name ip <<<"$entry"
     ssh "$PVE_HOST" qm status "$vmid" >/dev/null 2>&1 || continue
@@ -97,17 +125,29 @@ if ((!RENDER_ONLY)); then
     scsi1="$(sed -n 's/^scsi1: //p' <<<"$config")"
     # `qm config` prints the volume as it was attached plus its options: <backing>,size=...
     backing="${scsi1%%,*}"
-    [[ "$backing" == "/dev/zvol/pool/mcdata/${name}" ]] || unsafe+=("${vmid} (${name})")
+    [[ "$backing" == "/dev/zvol/pool/mcdata/${name}" ]] || { unsafe+=("${vmid} (${name})"); continue; }
+    # BatchMode: an unanswerable probe must refuse, not sit at a password prompt.
+    ssh -o BatchMode=yes "core@${ip}" \
+      "mountpoint -q /srv/${name}/data || test -d /srv/${name}/data.pre-zvol" >/dev/null 2>&1 \
+      || unproven+=("${vmid} (${name})")
   done
   if ((${#unsafe[@]})); then
     echo "REFUSE: these VMs have no host-owned data disk attached as scsi1, so destroying" >&2
     echo "        them takes the world on their OS disk (scsi0) with it:" >&2
     for entry in ${unsafe[@]+"${unsafe[@]}"}; do echo "          VM $entry" >&2; done
-    echo "        Move each world onto its zvol first, one node at a time, in this order:" >&2
-    echo "          1. scripts/fleet/15-ensure-data-disks.sh" >&2
-    echo "          2. uv run pyinfra inventory/hosts.py --limit <node> tasks/gameserver.py  # writes the .mount unit, then refuses" >&2
-    echo "          3. scripts/fleet/25-migrate-data.sh <node>                              # on the node, server stopped" >&2
-    echo "          4. uv run pyinfra inventory/hosts.py --limit <node> tasks/gameserver.py  # mounts it, starts the container" >&2
+    order_hint
+    echo "        Nothing was stopped, detached or destroyed." >&2
+    exit 1
+  fi
+  if ((${#unproven[@]})); then
+    echo "REFUSE: these VMs have their zvol attached, but nothing proves the world is on it," >&2
+    echo "        so destroying them takes the world still sitting on scsi0:" >&2
+    for entry in ${unproven[@]+"${unproven[@]}"}; do echo "          VM $entry" >&2; done
+    echo "        Proven means: /srv/<node>/data is a mountpoint, or a finished" >&2
+    echo "        25-migrate-data.sh left /srv/<node>/data.pre-zvol behind. This check says" >&2
+    echo "        nothing about *which* device is mounted — the deploy's findmnt check does." >&2
+    order_hint
+    echo "        A node that does not answer ssh also lands here: bring it up and re-run." >&2
     echo "        Nothing was stopped, detached or destroyed." >&2
     exit 1
   fi
@@ -170,7 +210,9 @@ if ((RENDER_ONLY)); then
 else
   # After every VM exists: a world already on pool/mcdata/<node> comes back with the newly
   # imported OS disk. On a mid-loop abort this never runs, so a rebuilt node has no scsi1
-  # until the next full run (the pre-flight above refuses until then).
+  # until the next full run (the pre-flight above refuses until then). A re-run also refuses
+  # until step 4's deploy has mounted the volume on every rebuilt node — that mount is the
+  # proof the pre-flight asks for, and a node still booting cannot give it.
   bash "$ROOT/scripts/fleet/15-ensure-data-disks.sh"
   echo "OK: ${#NODES[@]} nodes created; each rebases on first boot (~5-10 min)"
 fi

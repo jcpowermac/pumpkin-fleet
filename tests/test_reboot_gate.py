@@ -61,7 +61,7 @@ def status_server(payload: dict):
     return port, listener
 
 
-def ping_payload(payload: dict) -> dict:
+def ping_payload(payload) -> dict:
     port, listener = status_server(payload)
     try:
         out = subprocess.run(
@@ -123,6 +123,42 @@ def test_an_empty_server_still_allows_the_reboot_through_mc_ping(capsys):
     printed = ping_payload({"players": {"online": 0, "max": 20}, "version": {"name": "Paper"}})
     assert reboot_gate.should_reboot(printed) is True
     assert "reboot allowed" in capsys.readouterr().out
+
+
+def ping_raw(payload) -> subprocess.CompletedProcess:
+    port, listener = status_server(payload)
+    try:
+        return subprocess.run(
+            [sys.executable, "-I", str(MC_PING), "127.0.0.1", str(port)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    finally:
+        listener.close()
+
+
+def test_a_payload_that_is_not_a_json_object_is_unparseable_not_unreachable(capsys):
+    """A status array (or any non-object JSON) made mc-ping raise AttributeError, exit 1, and
+    read as "not answering" — which allows the reboot. It *did* answer, so it may well be the
+    live server: the rule the two files share is that only silence allows a reboot."""
+    out = ping_raw(["not", "an", "object"])
+    assert out.returncode == reboot_gate.UNPARSEABLE, (out.returncode, out.stdout, out.stderr)
+    assert "unparseable" in out.stderr.lower(), out.stderr
+    # ...and what the gate does with that exit code: it answered, so do not reboot.
+    assert reboot_gate.should_reboot({}) is False
+    assert "no player count" in capsys.readouterr().out
+
+
+def test_an_unparseable_answer_never_reaches_the_reboot(monkeypatch, tmp_path, capsys):
+    """The gate's own path, not just should_reboot: mc-ping exiting 2 must not come back as
+    the `None` that means "unreachable, reboot away"."""
+    liar = tmp_path / "mc-ping.py"
+    liar.write_text("import sys\nsys.exit(2)\n")
+    monkeypatch.setattr(reboot_gate, "MC_PING", str(liar))
+    assert reboot_gate.ping() == {}
+    assert reboot_gate.should_reboot(reboot_gate.ping()) is False
+    assert "no player count" in capsys.readouterr().out
 
 
 def test_dry_run_prints_the_decision_and_does_not_reboot():
