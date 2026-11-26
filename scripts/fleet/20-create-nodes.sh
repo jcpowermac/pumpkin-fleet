@@ -211,7 +211,7 @@ else
   # After every VM exists: a world already on pool/mcdata/<node> comes back with the newly
   # imported OS disk. On a mid-loop abort this never runs, so a rebuilt node has no scsi1
   # until the next full run (the pre-flight above refuses until then). A re-run also refuses
-  # until step 4's deploy has mounted the volume on every rebuilt node — that mount is the
+  # until step 5's deploy has mounted the volume on every rebuilt node — that mount is the
   # proof the pre-flight asks for, and a node still booting cannot give it.
   bash "$ROOT/scripts/fleet/15-ensure-data-disks.sh"
   echo "OK: ${#NODES[@]} nodes created; each rebases on first boot (~5-10 min)"
