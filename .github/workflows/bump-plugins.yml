@@ -31,17 +31,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # --dry-run and --bump exit 2 when a plugin is actionable — the normal case here — and
-      # anything above 2 is a crash. `set +e` because a run step is `bash -e` by default, which
-      # would kill the step on that 2 before the exit code is read. The body is written before
-      # the bump, so it describes the change rather than the already-bumped manifest.
-      - name: Resolve the pins and write the PR body
+      # --dry-run exits 2 when a plugin is actionable, and --bump exits 2 when a plugin could not
+      # be resolved at all: both are normal here, anything above 2 is a crash. `set +e` because a
+      # run step is `bash -e` by default, which would kill the step on that 2 before the exit code
+      # is read. The body is written before the bump, so it describes the change rather than the
+      # already-bumped manifest.
+      #
+      # The gate is run here because a PR opened with the repository GITHUB_TOKEN triggers no
+      # pull_request workflows: containers.yml — and the gate it runs — never sees this PR, so
+      # without this step the only automated PR author in the repo opens PRs with no checks at
+      # all. A bump the gate rejects fails the run instead of opening a PR.
+      - name: Resolve the pins, gate the result and write the PR body
         run: |
           set +e
+          git show HEAD:containers/images.json > "$RUNNER_TEMP/base.json"
           uv run python scripts/resolve_plugins.py --dry-run > "$RUNNER_TEMP/pr-body.md"
           [ $? -le 2 ] || exit 1
           uv run python scripts/resolve_plugins.py --bump
           [ $? -le 2 ] || exit 1
+          set -e
+          uv run python scripts/ci_gate.py --base "$RUNNER_TEMP/base.json" --head containers/images.json
 
       - name: Push the bump branch and open the PR
         env:
@@ -54,10 +63,10 @@ jobs:
             exit 0
           fi
 
-          # No open bump PR (or none by this bot) reads as no duplicate, and so does a search
-          # that errors: the search is a plain command here, so `set -e` aborts the run on an
-          # API failure instead of quietly opening a second PR.
-          opens=$(gh pr list --state open --search 'author:github-actions[bot]' \
+          # No open bump PR (or none by this bot) reads as no duplicate. A search that errors is
+          # a plain command here, so `set -e` aborts the run instead of quietly opening a second
+          # PR. --limit: gh pr list truncates at 30.
+          opens=$(gh pr list --state open --limit 100 --search 'author:github-actions[bot]' \
                     --json headRefName \
                     --jq '.[] | select(.headRefName | startswith("bump/plugins-")) | .headRefName')
           want=$(jq -S '[.[].plugins[]?.sha256] | sort' containers/images.json)

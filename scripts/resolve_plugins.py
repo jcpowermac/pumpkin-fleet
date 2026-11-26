@@ -215,10 +215,12 @@ def resolve_github(p: Plugin, loader: str) -> Plugin:
     best = max(pool, key=lambda a: _version_key(_mc_token(a["name"]) or "0"))
     asset = next((a for a in pool if pinned and pinned in a["name"]), best)
     resolved = dataclasses.replace(p, version=release["tag_name"], url=asset["browser_download_url"])
-    if pinned and pinned not in f"{asset['name']} {release['tag_name']} {release['name']}":
-        resolved.stale = True
-        resolved.note = (f"upstream ships no {pinned} {loader} build; newest is {asset['name']} "
-                         f"(MC {_mc_token(asset['name']) or 'unknown'})")
+    # Assigned, never just set: a seed carries last run's flags, and a pin that has stopped being
+    # stale has to lose them or the manifest keeps asserting the opposite of the truth.
+    resolved.stale = bool(pinned) and pinned not in (
+        f"{asset['name']} {release['tag_name']} {release['name']}")
+    resolved.note = (f"upstream ships no {pinned} {loader} build; newest is {asset['name']} "
+                     f"(MC {_mc_token(asset['name']) or 'unknown'})") if resolved.stale else ""
     with tempfile.TemporaryDirectory() as tmp:
         resolved.sha256 = sha256_of_url(resolved.url, Path(tmp) / asset["name"])
     return resolved
@@ -281,10 +283,13 @@ def resolve_manifest(manifest: list[dict], image: dict, problems: list[str] | No
         entry["url"] = resolved.url
         entry["sha256"] = resolved.sha256
         entry["deps"] = resolved.deps
-        if resolved.note:
-            entry["note"] = resolved.note
+        # These two are a statement about this run, so a seed's copy is dropped when it no longer
+        # holds. A human annotation uses `_note`, which is not a field and survives.
+        entry.pop("stale", None)
+        entry.pop("note", None)
         if resolved.stale:
             entry["stale"] = True
+            entry["note"] = resolved.note
         out.append(entry)
 
         for dep in (expand_hangar_deps(resolved) if resolved.source == "hangar" else []):
@@ -329,12 +334,13 @@ def plan(manifest: list[dict], only: str | None = None
         added = {entry["install_as"] for entry in image["plugins"]} - set(before)
         moved = False
         for entry in image["plugins"]:
-            # A stale pin resolves to what it already says, so it is in no change row: the body
-            # has to report it separately or a reviewer never learns the pin is behind.
-            if entry.get("stale"):
+            old = before.get(entry["install_as"], {})
+            # Staleness is only reported for a pin this run leaves where it is: a stale entry that
+            # moves is a change row, and calling that "the pin stays" would be a lie.
+            if entry.get("stale") and (old.get("version"), old.get("url")) == (
+                    entry.get("version"), entry.get("url")):
                 stale.append(f"{image['name']}/{entry['name']}: pinned {entry.get('version')} — "
                              f"{entry.get('note') or 'upstream has no build for the pinned MC'}")
-            old = before.get(entry["install_as"], {})
             if old == entry:
                 continue
             changes.append({"image": image["name"], "name": entry["name"], "source": entry["source"],

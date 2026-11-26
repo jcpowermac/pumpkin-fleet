@@ -489,3 +489,32 @@ def test_a_bumped_manifest_passes_the_gate(monkeypatch, tmp_path):
     assert head[0]["version"] == "26.3-258-p2"
     assert ci_gate.gate(base, head) == []
     assert ci_gate.gate(base, base) == [], "an unchanged manifest is clean too"
+
+
+def test_a_pin_that_stops_being_stale_is_reported_as_a_change(monkeypatch, tmp_path, capsys):
+    """`stale: true` is seeded in the manifest from the week upstream had nothing compatible. It
+    describes that run, not the pin: once a compatible build appears the pin moves, so the body
+    must show it in the changes table as compatible and must not keep asserting under Staleness
+    that this PR leaves it where it is."""
+    path = tmp_path / "images.json"
+    monkeypatch.setattr(rp, "MANIFEST", path)
+    monkeypatch.setattr(rp, "fetch_json", _fetch({"repos/FabricMC/fabric": _fixture("github_fabric.json")}))
+    monkeypatch.setattr(rp, "sha256_of_url", lambda url, dest: "b" * 64)
+    seeded = {"name": "fabric-api", "slug": "FabricMC/fabric", "source": "github", "mc": ["26.3"],
+              "install_as": "fabric-api.jar", "version": "0.166.0+26.3",
+              "url": "https://github.com/FabricMC/fabric-api/releases/download/0.166.0%2B26.3/fabric-api-0.166.0%2B26.3.jar",
+              "sha256": "a" * 64, "deps": [],
+              "note": "upstream ships no 26.3 fabric build; newest is fabric-api-0.165.0+26.1.jar (MC 26.1)",
+              "stale": True}
+    path.write_text(json.dumps([{"name": "fabric", "version": "26.3-0.20.1-p1", "plugins": [seeded]}],
+                               indent=2) + "\n")
+
+    assert rp.main(["--dry-run"]) == 2, "the pin moved, so this is actionable"
+    body = capsys.readouterr().out
+    assert "0.166.0+26.3 -> 0.167.0+26.3" in body
+    assert "26.3 compatible" in body
+    assert "Staleness" not in body, "the pin moves in this PR, so it is not a pin that stays"
+
+    assert rp.main(["--bump"]) == 0
+    entry = json.loads(path.read_text())[0]["plugins"][0]
+    assert "stale" not in entry and "note" not in entry, "the flags describe a run, not a history"

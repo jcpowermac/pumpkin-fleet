@@ -22,14 +22,18 @@ def test_it_runs_weekly_and_on_demand():
 
 
 def test_it_asks_for_exactly_the_two_permissions_it_needs():
-    match = re.search(r"^permissions:\n((?:  \S.*\n)+)", _text(), re.M)
+    text = _text()
+    # One block, top level: a job-level block would be granted on top of this one and widen the
+    # token, which is the thing this test exists to catch.
+    assert [line for line in text.splitlines() if line.startswith("permissions:")] == ["permissions:"]
+    match = re.search(r"^permissions:\n((?:  \S.*\n)+)", text, re.M)
     assert match, "the workflow states its permissions"
     assert match.group(1).split() == ["contents:", "write", "pull-requests:", "write"]
 
 
 def test_it_never_merges_approves_or_promotes():
     text = _text()
-    for forbidden in ("pr merge", "pr review", "--auto", "promote.sh", "gh api -X"):
+    for forbidden in ("pr merge", "pr review", "--auto", "promote.sh", "gh api -X", "--method"):
         assert forbidden not in text, f"the bot must never run {forbidden!r}"
 
 
@@ -40,3 +44,20 @@ def test_it_stages_only_the_manifest():
 
 def test_the_branch_is_namespaced_by_run_number():
     assert "bump/plugins-${{ github.run_number }}" in _text()
+
+
+def test_it_runs_the_gate_itself_because_no_check_will_run_on_its_pr():
+    """A PR opened with GITHUB_TOKEN gets no pull_request workflows, so containers.yml — and the
+    gate in it — never runs on the bot's PR. The gap has to be covered by the bot, against the
+    commit the bump replaces, before the PR can exist."""
+    text = _text()
+    assert 'git show HEAD:containers/images.json > "$RUNNER_TEMP/base.json"' in text
+    gate = text.index("scripts/ci_gate.py")
+    assert '--base "$RUNNER_TEMP/base.json" --head containers/images.json' in text
+    assert gate < text.index("gh pr create"), "a rejected bump must fail the run, not open a PR"
+
+
+def test_the_duplicate_guard_runs_before_anything_is_pushed():
+    text = _text()
+    assert text.index("gh pr list") < text.index("git push")
+    assert "--limit 100" in text, "gh pr list truncates at 30, so the guard would miss older PRs"
