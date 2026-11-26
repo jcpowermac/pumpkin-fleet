@@ -403,6 +403,19 @@ exists:
    with only ssh/cockpit open; the port bind lands on the host interface and is
    dropped. Fix: `firewall-cmd --add-port=25565/tcp --permanent && reload`.
    Does not survive an OSTree rebase — revisit for Task 7 Step 3.
+5. **The game container runs as `core`, so cockpit only shows it in a PRIVILEGED
+   session.** Rootless podman puts it in core's store
+   (`/run/user/1000/podman/podman.sock`); jcallen (uid 2007) has an empty store of his
+   own. cockpit-podman finds *other users'* containers by scanning
+   `/sys/fs/cgroup` for `libpod.*scope`/`podman-*.scope`, and that scan is
+   `superuser: require` — so with a non-privileged session the panel is simply empty.
+   **Do not conclude the grant is broken:** verify `sudo -l -U jcallen` lists
+   `/usr/bin/cockpit-bridge`, `systemctl --user is-active podman.socket` (as core) is
+   active, then click **Administrative access** in cockpit and confirm with the
+   LDAP password (the deliberate no-NOPASSWD model). Privileged cockpit = root
+   bridge, but it still sees core's containers via that cgroup scan — root's own
+   podman store holds only cockpit's `ws` container, which is why checking
+   `sudo podman ps` disproves nothing.
 
 **Verifying a server is really up:** `scripts/mc-ping.py <ip> 25565` does a real
 protocol-777 status ping (varint framing; the server never acks the handshake — it
