@@ -303,7 +303,10 @@ Verify from outside: `nc -vz <public-ip> 24587` connects (Minecraft ping optiona
 
 **Interfaces:**
 - Consumes: template VM 190 (Task 1), pinned uCore tag from spike notes.
-- Produces: 4 running uCore VMs with static IPs `.54/.55/.56/.57`, hostnames `lobby/plugins/vanilla/neoforge`, guest agent running, SSH key for `core`.
+- Produces: 4 running uCore VMs with static IPs `.54/.55/.56/.57`, hostnames `lobby/plugins/vanilla/neoforge`, guest agent
+  running, SSH key for `core`. **Plus a second disk per VM** (2026-11-26 decision): `zfs create -V <size>
+  pool/mcdata/<node>` attached as `scsi1: /dev/zvol/pool/mcdata/<node>` — host-owned, so it survives
+  `qm destroy --purge`. `scsi0` stays the disposable OS disk.
 
 Sizing (fixed): 201/202/203 = 4 cores / 4 GiB; 204 = 4 cores / 6 GiB (4 GiB heap + JVM overhead). All: `pool` disk 40 GiB qcow2, virtio-net on vmbr1.
 
@@ -410,6 +413,11 @@ Verify: from a test client (or `mcbbs`-style ping script) all 4 servers appear b
 ---
 
 ### Task 8: Migrate old servers off
+
+> **DESCOPED 2026-11-26 by jcallen — do not touch the legacy LXCs (100–107).** No world migration, no copies out of
+> them, no stopping them. Persistent Minecraft data instead lives on a second disk per VM (`scsi1`, host-owned ZFS volume
+> `pool/mcdata/<node>`), see `docs/superpowers/specs/2026-11-26-fleet-plugin-gitops-design.md` §2b. Steps below are kept
+> as history only; do not execute.
 
 **Files:**
 - Create (repo): `configs/migration-map.md` (old VMID → new host → data dirs → cutover window)

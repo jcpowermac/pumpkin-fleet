@@ -16,7 +16,22 @@ LXCs. Access: `ssh root@172.31.12.99` (key-based); `pct exec <vmid>` for LXCs,
 
 **Ignore the legacy minecraft LXC fleet on pve3 (VMIDs 100-107: sr, velocity, usc,
 CMCS, pangolin, cmcs2, traefik, lobby) — they are the old LXD/LXC stack being
-replaced by this repo's uCore VMs (201-204) + LXC 150.**
+replaced by this repo's uCore VMs (201-204) + LXC 150.** **Do not touch them** (2026-11-26): no migration, no copies
+out of them, no stopping them — plan Task 8 is descoped. LXC 150 (authentik) is part of *this* fleet and stays in scope.
+
+**Minecraft data lives on a second disk** (2026-11-26): each game VM has `scsi0` = disposable OS disk and `scsi1` =
+host-owned ZFS volume `pool/mcdata/<node>`, attached as `/dev/zvol/...` so `qm destroy --purge` cannot delete it. Verified
+on pve3 with a throwaway VMID. See the fleet design doc §2b.
+
+## Scope note (2026-11-26): pumpkin is out
+
+**Pumpkin (the Rust server + PatchBukkit + the native OPanel cdylib) is no longer used
+in the fleet.** Still in the repo, now stale — do not build on it without asking:
+`containers/pumpkin/`, the `pumpkin` entry in `containers/images.json` (with its
+version-locked OPanel `.so` pin), and `tasks/gameserver.py` `WORKLOADS` mapping
+`lobby -> pumpkin` (so a deployed lobby is currently running the pumpkin image; what
+replaces it is undecided). The `containers/README.md` "glibc is forced by pumpkin"
+argument is also stale in that form — glibc is still required, but by `neoforge`.
 
 ## Gotchas that have already cost time
 
