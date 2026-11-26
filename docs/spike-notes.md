@@ -460,3 +460,27 @@ protocol-777 status ping (varint framing; the server never acks the handshake �
 waits straight for the status request; status response is
 `[packet id][string len][JSON]`). A plain TCP connect is not enough: pasta accepts
 the SYN before it's proven it forwards.
+
+## 17. Host-owned data disks: the disk a destroy must not reach
+
+The fleet's rebuild path treats `scsi0` as disposable and keeps the world on a
+**host-owned ZFS volume** attached as `scsi1` (`zfs create -V <size> pool/mcdata/<node>`
++ `qm set <vmid> --scsi1 /dev/zvol/pool/mcdata/<node>`). Two facts that decided it:
+
+1. **A host-owned zvol survives `qm destroy --purge`.** Probed with a throwaway VMID (299):
+   create `pool/test-mcdata`, attach it as `/dev/zvol/pool/test-mcdata`, `qm destroy 299 --purge`
+   → the VM, its `scsi0` and its cloud-init drive are gone, `zfs list` still shows the zvol.
+   `--purge` only removes storage *owned by the VM* (`vm-<id>-disk-N`); a host device is left
+   alone. Symptom if you get this backwards: a destroy-and-recreate of a node deletes the world.
+2. **PVE's own zvols are VM-owned and do not survive.** Today every node disk is
+   `pool:vm-201-disk-0`-style (`qm config 201`), so the existing disks are exactly the kind
+   `--purge` deletes — which is why the data disk has to be created outside the VM.
+
+Consequences that the scripts now encode: `15-ensure-data-disks.sh` never destroys or
+detaches, and refuses when an existing `scsi1` points somewhere else; `needs_format` is true
+only for a device with no filesystem at all, so a non-XFS device makes the deploy refuse rather
+than `mkfs` over a world; and migrating a node's old `/srv/<node>/data` moves the original tree
+aside to `data.pre-zvol` instead of deleting it. The in-guest `/dev/disk/by-id` name for a host
+zvol is still unverified on these nodes — until it is pinned, `data_device` falls back to
+`FLEET_DATA_DEV` and fails loudly rather than mounting the first disk it finds.
+
