@@ -1,0 +1,305 @@
+[
+  {
+    "id": "nY6VN1XH",
+    "name": "2.22.0 - The Tiny Copper Mayhem Update",
+    "version_number": "2.22.0",
+    "loaders": [
+      "bukkit",
+      "paper",
+      "spigot"
+    ],
+    "game_versions": [
+      "1.10.2",
+      "1.11.2",
+      "1.12.2",
+      "1.13.2",
+      "1.14.4",
+      "1.15.2",
+      "1.16.5",
+      "1.17.1",
+      "1.18.2",
+      "1.19.4",
+      "1.20.6",
+      "1.21.11",
+      "1.8.8",
+      "1.8.9",
+      "1.9.4",
+      "26.1.2"
+    ],
+    "date_published": "2026-05-31T15:05:35.376401Z",
+    "files": [
+      {
+        "filename": "EssentialsX-2.22.0.jar",
+        "url": "https://cdn.modrinth.com/data/hXiIvTyT/versions/nY6VN1XH/EssentialsX-2.22.0.jar",
+        "primary": true,
+        "hashes": {
+          "sha1": "c509ef487056e460dff2fbd0462ae8f0c3b5b0d2",
+          "sha512": "472ecf71924801723643ca6e1f9931297de5aa0874a544f8a719e2e2f7c81af81ef7bcbd38b6e43f0260a9dae6abe42c97907e70e2430e326ff8cff12ebd61cf"
+        }
+      }
+    ]
+  },
+  {
+    "id": "Oa9ZDzZq",
+    "name": "2.21.2 - The Chase the Skies Update",
+    "version_number": "2.21.2",
+    "loaders": [
+      "bukkit",
+      "paper",
+      "spigot"
+    ],
+    "game_versions": [
+      "1.10.2",
+      "1.11.2",
+      "1.12.2",
+      "1.13.2",
+      "1.14.4",
+      "1.15.2",
+      "1.16.5",
+      "1.17.1",
+      "1.18.2",
+      "1.19.4",
+      "1.20.6",
+      "1.21.8",
+      "1.8.8",
+      "1.8.9",
+      "1.9.4"
+    ],
+    "date_published": "2025-08-03T18:52:13.724098Z",
+    "files": [
+      {
+        "filename": "EssentialsX-2.21.2.jar",
+        "url": "https://cdn.modrinth.com/data/hXiIvTyT/versions/Oa9ZDzZq/EssentialsX-2.21.2.jar",
+        "primary": true,
+        "hashes": {
+          "sha1": "f678ee85da1a8adf309df163d8b4166d2dc65554",
+          "sha512": "0571b015dce84cf03e906c2d498e8bc3827d86debafafb89851517a76c3eec0391b9bb90f6ec4a5f0dbf4c18bee84ead5e354fc0a5be0cc567fdaa9fc8d96c15"
+        }
+      }
+    ]
+  },
+  {
+    "id": "V4qyvs91",
+    "name": "2.21.1 - The Spring to Life Update",
+    "version_number": "2.21.1",
+    "loaders": [
+      "bukkit",
+      "paper",
+      "spigot"
+    ],
+    "game_versions": [
+      "1.10.2",
+      "1.11.2",
+      "1.12.2",
+      "1.13.2",
+      "1.14.4",
+      "1.15.2",
+      "1.16.5",
+      "1.17.1",
+      "1.18.2",
+      "1.19.4",
+      "1.20.6",
+      "1.21.5",
+      "1.8.8",
+      "1.8.9",
+      "1.9.4"
+    ],
+    "date_published": "2025-05-25T21:19:10.638874Z",
+    "files": [
+      {
+        "filename": "EssentialsX-2.21.1.jar",
+        "url": "https://cdn.modrinth.com/data/hXiIvTyT/versions/V4qyvs91/EssentialsX-2.21.1.jar",
+        "primary": true,
+        "hashes": {
+          "sha1": "707e73c008ae692c96f3682c41f3be1df8dc210d",
+          "sha512": "32aa5529aac63e0d6ae52b17337798a5aafe5087c898d972b0306414669a215ad34a9ef93f6b57eaae33b6d57e3ae16c7b6f8f5d14c44da9df9cfb4c94b7d084"
+        }
+      }
+    ]
+  },
+  {
+    "id": "SKQwLLoQ",
+    "name": "2.21.0 - The Adventure Awakening Update",
+    "version_number": "2.21.0",
+    "loaders": [
+      "bukkit",
+      "paper",
+      "spigot"
+    ],
+    "game_versions": [
+      "1.10.2",
+      "1.11.2",
+      "1.12.2",
+      "1.13.2",
+      "1.14.4",
+      "1.15.2",
+      "1.16.5",
+      "1.17.1",
+      "1.18.2",
+      "1.19.4",
+      "1.20.6",
+      "1.21.4",
+      "1.8.8",
+      "1.8.9",
+      "1.9.4"
+    ],
+    "date_published": "2025-03-22T22:55:22.368601Z",
+    "files": [
+      {
+        "filename": "EssentialsX-2.21.0.jar",
+        "url": "https://cdn.modrinth.com/data/hXiIvTyT/versions/SKQwLLoQ/EssentialsX-2.21.0.jar",
+        "primary": true,
+        "hashes": {
+          "sha1": "fc71f668dba90040e63992361793ba73941b810e",
+          "sha512": "b9ebac202a129cda3bcdce4c553519425d0aad55ef585b5197367cc868d3a80ee6917b9069cff0f320b1e6daf5699ef3b5a395e23b19ce453d7ac502c4e8b34f"
+        }
+      }
+    ]
+  },
+  {
+    "id": "puUfqBpY",
+    "name": "2.20.1 - The Trails and Tales Update",
+    "version_number": "2.20.1",
+    "loaders": [
+      "bukkit",
+      "paper",
+      "spigot"
+    ],
+    "game_versions": [
+      "1.10.2",
+      "1.11.2",
+      "1.12.2",
+      "1.13.2",
+      "1.14.4",
+      "1.15.2",
+      "1.16.5",
+      "1.17.1",
+      "1.18.2",
+      "1.19.4",
+      "1.20.1",
+      "1.8.8",
+      "1.9.4"
+    ],
+    "date_published": "2023-08-05T20:14:51.163791Z",
+    "files": [
+      {
+        "filename": "EssentialsX-2.20.1.jar",
+        "url": "https://cdn.modrinth.com/data/hXiIvTyT/versions/puUfqBpY/EssentialsX-2.20.1.jar",
+        "primary": true,
+        "hashes": {
+          "sha1": "e626f9f250470bcf2feffbc3740f738f9cee50ef",
+          "sha512": "d6453063b8197b96c5f244f5b23bd97abf75c9bd60206e1f9e40ae4bb6e93d0141a3b253dce588a6335a43f8c2c37f02d14563587668edbff0d60daac80b42ca"
+        }
+      }
+    ]
+  },
+  {
+    "id": "pdY49V5Y",
+    "name": "2.20.0 - The Better Together Update",
+    "version_number": "2.20.0",
+    "loaders": [
+      "bukkit",
+      "paper",
+      "spigot"
+    ],
+    "game_versions": [
+      "1.10.2",
+      "1.11.2",
+      "1.12.2",
+      "1.13.2",
+      "1.14.4",
+      "1.15.2",
+      "1.16.5",
+      "1.17.1",
+      "1.18.2",
+      "1.19.4",
+      "1.8.8",
+      "1.9.4"
+    ],
+    "date_published": "2023-05-23T15:54:45.272867Z",
+    "files": [
+      {
+        "filename": "EssentialsX-2.20.0.jar",
+        "url": "https://cdn.modrinth.com/data/hXiIvTyT/versions/pdY49V5Y/EssentialsX-2.20.0.jar",
+        "primary": true,
+        "hashes": {
+          "sha512": "c43daf29469f630849d39db6b2f2075a28664ba4b5437183b2e314feaabada38bf2e58d32ed578aa20144e0f3433e6911185277651be59d7f43ed7fcfc2e9373",
+          "sha1": "0fe111344c14fa45997da874a025e76afaf74310"
+        }
+      }
+    ]
+  },
+  {
+    "id": "z951OvHM",
+    "name": "2.19.7 - The (Even Less) Wild Update",
+    "version_number": "2.19.7",
+    "loaders": [
+      "bukkit",
+      "paper",
+      "spigot"
+    ],
+    "game_versions": [
+      "1.10.2",
+      "1.11.2",
+      "1.12.2",
+      "1.13.2",
+      "1.14.4",
+      "1.15.2",
+      "1.16.5",
+      "1.17.1",
+      "1.18.2",
+      "1.19.2",
+      "1.8.8",
+      "1.9.4"
+    ],
+    "date_published": "2022-08-23T12:52:18.759973Z",
+    "files": [
+      {
+        "filename": "EssentialsX-2.19.7.jar",
+        "url": "https://cdn.modrinth.com/data/hXiIvTyT/versions/z951OvHM/EssentialsX-2.19.7.jar",
+        "primary": true,
+        "hashes": {
+          "sha1": "1142297fc1facd0f6015202b21796a99571f681d",
+          "sha512": "96da3eeed46d99139ee82b78780de9a5fbc6cd8cffe1c277b79a8718e0e3587a959e259975dae5c51be9ee2afe78bdb8347e2a3ccbb35e8542764cad00901662"
+        }
+      }
+    ]
+  },
+  {
+    "id": "1RQ0Dtsz",
+    "name": "2.19.6 - The (Not Too) Wild Update",
+    "version_number": "2.19.6",
+    "loaders": [
+      "bukkit",
+      "paper",
+      "spigot"
+    ],
+    "game_versions": [
+      "1.10.2",
+      "1.11.2",
+      "1.12.2",
+      "1.13.2",
+      "1.14.4",
+      "1.15.2",
+      "1.16.5",
+      "1.17.1",
+      "1.18.2",
+      "1.19.2",
+      "1.8.8",
+      "1.8.9",
+      "1.9.4"
+    ],
+    "date_published": "2022-08-14T20:25:21.387177Z",
+    "files": [
+      {
+        "filename": "EssentialsX-2.19.6.jar",
+        "url": "https://cdn.modrinth.com/data/hXiIvTyT/versions/2.19.6/EssentialsX-2.19.6.jar",
+        "primary": true,
+        "hashes": {
+          "sha512": "95f57b1134b54f74cad86becc60d138a2cd8dbe7edc34b004c1b3f2434bea3dd1d9a47d8df319b90000bde000d7f6e8319c9c577d27cc8f21dc3b5b52981194c",
+          "sha1": "9d8f167f18c27ba25c6900d63236efe43cb9b68f"
+        }
+      }
+    ]
+  }
+]

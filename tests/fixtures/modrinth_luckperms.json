@@ -1,0 +1,550 @@
+[
+  {
+    "name": "v5.5.87 (NeoForge 26.3)",
+    "version_number": "v5.5.87-neoforge",
+    "loaders": [
+      "neoforge"
+    ],
+    "game_versions": [
+      "26.3"
+    ],
+    "date_published": "2026-10-06T07:14:55.653185Z",
+    "files": [
+      {
+        "filename": "LuckPerms-NeoForge-5.5.87.jar",
+        "url": "https://cdn.modrinth.com/data/Vebnzrzj/versions/MuQ07Tao/LuckPerms-NeoForge-5.5.87.jar",
+        "primary": true,
+        "hashes": {
+          "sha512": "40946aa19502f32e0494705b46941f54a8b2d2f0b59fbfd6b7a3adebd617b49f5be219001a294811b97bc18a9955257756119c84730bf9a60c20f9a245ec4ce2",
+          "sha1": "9ba3b2237096508c6ff958b9484b921c98f9df8f"
+        }
+      }
+    ]
+  },
+  {
+    "name": "v5.5.85 (NeoForge 26.x)",
+    "version_number": "v5.5.85-neoforge",
+    "loaders": [
+      "neoforge"
+    ],
+    "game_versions": [
+      "26.1",
+      "26.1.1",
+      "26.1.2",
+      "26.2",
+      "26.3"
+    ],
+    "date_published": "2026-09-19T07:45:35.628116Z",
+    "files": [
+      {
+        "filename": "LuckPerms-NeoForge-5.5.85.jar",
+        "url": "https://cdn.modrinth.com/data/Vebnzrzj/versions/cLEqLHhz/LuckPerms-NeoForge-5.5.85.jar",
+        "primary": true,
+        "hashes": {
+          "sha512": "be3d62b3f03e374f057a59048d8aa41cde50362f4654619650d2b96b8be003d2fa1ee9c8256dcd2d116163dc1c77b56d0c73e6b68eb797addee06fbb3a965f33",
+          "sha1": "33e27dfdff636f6c108ec61fdf704b99a3eb6261"
+        }
+      }
+    ]
+  },
+  {
+    "name": "v5.5.85 (Fabric 26.x)",
+    "version_number": "v5.5.85-fabric",
+    "loaders": [
+      "fabric"
+    ],
+    "game_versions": [
+      "26.1",
+      "26.1.1",
+      "26.1.2",
+      "26.2",
+      "26.3"
+    ],
+    "date_published": "2026-09-19T07:45:19.861990Z",
+    "files": [
+      {
+        "filename": "LuckPerms-Fabric-5.5.85.jar",
+        "url": "https://cdn.modrinth.com/data/Vebnzrzj/versions/DzQPkkXY/LuckPerms-Fabric-5.5.85.jar",
+        "primary": true,
+        "hashes": {
+          "sha512": "37de9e16272b6bbf82f422ddf012fa810d32c617c5621919157b662b4edfe956a870c5bc3ca4b05f32c90d7135f0ac2580ea16cd7c481c26a04778f639c3f89c",
+          "sha1": "b3398b22215bcec18813a5cf764b3a8c153fe8ba"
+        }
+      }
+    ]
+  },
+  {
+    "name": "v5.5.71 (Velocity)",
+    "version_number": "v5.5.71-velocity",
+    "loaders": [
+      "velocity"
+    ],
+    "game_versions": [
+      "1.10",
+      "1.10.1",
+      "1.10.2",
+      "1.11",
+      "1.11.1",
+      "1.11.2",
+      "1.12",
+      "1.12.1",
+      "1.12.2",
+      "1.13",
+      "1.13.1",
+      "1.13.2",
+      "1.14",
+      "1.14.1",
+      "1.14.2",
+      "1.14.3",
+      "1.14.4",
+      "1.15",
+      "1.15.1",
+      "1.15.2",
+      "1.16",
+      "1.16.1",
+      "1.16.2",
+      "1.16.3",
+      "1.16.4",
+      "1.16.5",
+      "1.17",
+      "1.17.1",
+      "1.18",
+      "1.18.1",
+      "1.18.2",
+      "1.19",
+      "1.19.1",
+      "1.19.2",
+      "1.19.3",
+      "1.19.4",
+      "1.20",
+      "1.20.1",
+      "1.20.2",
+      "1.20.3",
+      "1.20.4",
+      "1.20.5",
+      "1.20.6",
+      "1.21",
+      "1.21.1",
+      "1.21.10",
+      "1.21.11",
+      "1.21.2",
+      "1.21.3",
+      "1.21.4",
+      "1.21.5",
+      "1.21.6",
+      "1.21.7",
+      "1.21.8",
+      "1.21.9",
+      "1.8.9",
+      "1.9",
+      "1.9.1",
+      "1.9.2",
+      "1.9.3",
+      "1.9.4",
+      "26.1",
+      "26.1.1",
+      "26.1.2",
+      "26.2",
+      "26.3"
+    ],
+    "date_published": "2026-08-06T19:40:25.429053Z",
+    "files": [
+      {
+        "filename": "LuckPerms-Velocity-5.5.71.jar",
+        "url": "https://cdn.modrinth.com/data/Vebnzrzj/versions/tamnmXad/LuckPerms-Velocity-5.5.71.jar",
+        "primary": true,
+        "hashes": {
+          "sha512": "a619da8804727bed7b2b2ee5383974329a3c09181a67745484fdffd0f4b6c5b13c44aa88e0d2b30d13f3068d9b0f3e26863abba9855f80a7eb5f9455ca6c40d4",
+          "sha1": "6e797ac9fc72b74870b6744a97ea1c2337cbb68a"
+        }
+      }
+    ]
+  },
+  {
+    "name": "v5.5.71 (Bukkit)",
+    "version_number": "v5.5.71-bukkit",
+    "loaders": [
+      "bukkit",
+      "folia",
+      "paper",
+      "spigot"
+    ],
+    "game_versions": [
+      "1.10",
+      "1.10.1",
+      "1.10.2",
+      "1.11",
+      "1.11.1",
+      "1.11.2",
+      "1.12",
+      "1.12.1",
+      "1.12.2",
+      "1.13",
+      "1.13.1",
+      "1.13.2",
+      "1.14",
+      "1.14.1",
+      "1.14.2",
+      "1.14.3",
+      "1.14.4",
+      "1.15",
+      "1.15.1",
+      "1.15.2",
+      "1.16",
+      "1.16.1",
+      "1.16.2",
+      "1.16.3",
+      "1.16.4",
+      "1.16.5",
+      "1.17",
+      "1.17.1",
+      "1.18",
+      "1.18.1",
+      "1.18.2",
+      "1.19",
+      "1.19.1",
+      "1.19.2",
+      "1.19.3",
+      "1.19.4",
+      "1.20",
+      "1.20.1",
+      "1.20.2",
+      "1.20.3",
+      "1.20.4",
+      "1.20.5",
+      "1.20.6",
+      "1.21",
+      "1.21.1",
+      "1.21.10",
+      "1.21.11",
+      "1.21.2",
+      "1.21.3",
+      "1.21.4",
+      "1.21.5",
+      "1.21.6",
+      "1.21.7",
+      "1.21.8",
+      "1.21.9",
+      "1.8.9",
+      "1.9",
+      "1.9.1",
+      "1.9.2",
+      "1.9.3",
+      "1.9.4",
+      "26.1",
+      "26.1.1",
+      "26.1.2",
+      "26.2",
+      "26.3"
+    ],
+    "date_published": "2026-08-06T19:40:10.637955Z",
+    "files": [
+      {
+        "filename": "LuckPerms-Bukkit-5.5.71.jar",
+        "url": "https://cdn.modrinth.com/data/Vebnzrzj/versions/b0mk8uS6/LuckPerms-Bukkit-5.5.71.jar",
+        "primary": true,
+        "hashes": {
+          "sha1": "fc8bb9919fa77c670b7ed5c284bcb66770ea71fc",
+          "sha512": "188a91f0a543d23bfda32385fca6db63d61e49c8a422bd452a260bd9cbc6a7d7fe45071199e9fca8f3ce43c2b41ee84fd315bd15464577028ff3951a7d4fab27"
+        }
+      }
+    ]
+  },
+  {
+    "name": "v5.5.57 (NeoForge 26.2)",
+    "version_number": "v5.5.57-neoforge",
+    "loaders": [
+      "neoforge"
+    ],
+    "game_versions": [
+      "26.1",
+      "26.1.1",
+      "26.1.2",
+      "26.2"
+    ],
+    "date_published": "2026-06-18T21:16:30.938696Z",
+    "files": [
+      {
+        "filename": "LuckPerms-NeoForge-5.5.57.jar",
+        "url": "https://cdn.modrinth.com/data/Vebnzrzj/versions/7Y1pWdrV/LuckPerms-NeoForge-5.5.57.jar",
+        "primary": true,
+        "hashes": {
+          "sha1": "be9cfd7c3d7b1d90e2f64ff9c68e0f31fb07cae7",
+          "sha512": "79391591c09ee237052d52e7db1094efddb655088ecd0bb3ec857542d4a509e4a47cf0a8baab884e832f3f5358cbf49ba823d1005e2e993a0e46b1f93416b7fb"
+        }
+      }
+    ]
+  },
+  {
+    "name": "v5.5.57 (Fabric 26.2)",
+    "version_number": "v5.5.57-fabric",
+    "loaders": [
+      "fabric"
+    ],
+    "game_versions": [
+      "26.1",
+      "26.1.1",
+      "26.1.2",
+      "26.2"
+    ],
+    "date_published": "2026-06-18T21:16:14.917799Z",
+    "files": [
+      {
+        "filename": "LuckPerms-Fabric-5.5.57.jar",
+        "url": "https://cdn.modrinth.com/data/Vebnzrzj/versions/UHUghDkV/LuckPerms-Fabric-5.5.57.jar",
+        "primary": true,
+        "hashes": {
+          "sha512": "6fedf31ff4d17710394463b7bfc97f2beba90eaa0327d6e718aab3195ec748bfba2835a9af804593fc1788e256dba79534da7f249411c8daec47b6e1e70e6f42",
+          "sha1": "a1afe63434a37a4b25c29e49e0388044aa60f222"
+        }
+      }
+    ]
+  },
+  {
+    "name": "v5.5.54 (Fabric 26.1.2)",
+    "version_number": "v5.5.54-fabric",
+    "loaders": [
+      "fabric"
+    ],
+    "game_versions": [
+      "26.1",
+      "26.1.1",
+      "26.1.2"
+    ],
+    "date_published": "2026-05-29T21:16:18.187776Z",
+    "files": [
+      {
+        "filename": "LuckPerms-Fabric-5.5.54.jar",
+        "url": "https://cdn.modrinth.com/data/Vebnzrzj/versions/Nq5UZXxA/LuckPerms-Fabric-5.5.54.jar",
+        "primary": true,
+        "hashes": {
+          "sha512": "e63b99101048779890ff2a1c56a919177e5b44c396189c8ae6d80000a9010bf413d577924f2c3917006ec600a5049ed772d305aaf22f26b082a3167e17139eaa",
+          "sha1": "b22f29d4bb0847bd336a98b639aed71de191bfe8"
+        }
+      }
+    ]
+  },
+  {
+    "name": "v5.5.53 (Velocity)",
+    "version_number": "v5.5.53-velocity",
+    "loaders": [
+      "velocity"
+    ],
+    "game_versions": [
+      "1.10",
+      "1.10.1",
+      "1.10.2",
+      "1.11",
+      "1.11.1",
+      "1.11.2",
+      "1.12",
+      "1.12.1",
+      "1.12.2",
+      "1.13",
+      "1.13.1",
+      "1.13.2",
+      "1.14",
+      "1.14.1",
+      "1.14.2",
+      "1.14.3",
+      "1.14.4",
+      "1.15",
+      "1.15.1",
+      "1.15.2",
+      "1.16",
+      "1.16.1",
+      "1.16.2",
+      "1.16.3",
+      "1.16.4",
+      "1.16.5",
+      "1.17",
+      "1.17.1",
+      "1.18",
+      "1.18.1",
+      "1.18.2",
+      "1.19",
+      "1.19.1",
+      "1.19.2",
+      "1.19.3",
+      "1.19.4",
+      "1.20",
+      "1.20.1",
+      "1.20.2",
+      "1.20.3",
+      "1.20.4",
+      "1.20.5",
+      "1.20.6",
+      "1.21",
+      "1.21.1",
+      "1.21.10",
+      "1.21.11",
+      "1.21.2",
+      "1.21.3",
+      "1.21.4",
+      "1.21.5",
+      "1.21.6",
+      "1.21.7",
+      "1.21.8",
+      "1.21.9",
+      "1.8.9",
+      "1.9",
+      "1.9.1",
+      "1.9.2",
+      "1.9.3",
+      "1.9.4",
+      "26.1",
+      "26.1.1",
+      "26.1.2",
+      "26.2"
+    ],
+    "date_published": "2026-05-27T07:14:53.197692Z",
+    "files": [
+      {
+        "filename": "LuckPerms-Velocity-5.5.53.jar",
+        "url": "https://cdn.modrinth.com/data/Vebnzrzj/versions/BmxJvHsa/LuckPerms-Velocity-5.5.53.jar",
+        "primary": true,
+        "hashes": {
+          "sha512": "1beaaff1af5106453166297392fc4671c82f989af703bc92f8169d38c393ee21d743b81b8127c5d548213c8f5066aee23d01503c2827cf977bc4f73ed8601524",
+          "sha1": "087056d7d0a5c1f2c677429a18ba8455b0df448d"
+        }
+      }
+    ]
+  },
+  {
+    "name": "v5.5.53 (Bukkit)",
+    "version_number": "v5.5.53-bukkit",
+    "loaders": [
+      "bukkit",
+      "folia",
+      "paper",
+      "spigot"
+    ],
+    "game_versions": [
+      "1.10",
+      "1.10.1",
+      "1.10.2",
+      "1.11",
+      "1.11.1",
+      "1.11.2",
+      "1.12",
+      "1.12.1",
+      "1.12.2",
+      "1.13",
+      "1.13.1",
+      "1.13.2",
+      "1.14",
+      "1.14.1",
+      "1.14.2",
+      "1.14.3",
+      "1.14.4",
+      "1.15",
+      "1.15.1",
+      "1.15.2",
+      "1.16",
+      "1.16.1",
+      "1.16.2",
+      "1.16.3",
+      "1.16.4",
+      "1.16.5",
+      "1.17",
+      "1.17.1",
+      "1.18",
+      "1.18.1",
+      "1.18.2",
+      "1.19",
+      "1.19.1",
+      "1.19.2",
+      "1.19.3",
+      "1.19.4",
+      "1.20",
+      "1.20.1",
+      "1.20.2",
+      "1.20.3",
+      "1.20.4",
+      "1.20.5",
+      "1.20.6",
+      "1.21",
+      "1.21.1",
+      "1.21.10",
+      "1.21.11",
+      "1.21.2",
+      "1.21.3",
+      "1.21.4",
+      "1.21.5",
+      "1.21.6",
+      "1.21.7",
+      "1.21.8",
+      "1.21.9",
+      "1.8.9",
+      "1.9",
+      "1.9.1",
+      "1.9.2",
+      "1.9.3",
+      "1.9.4",
+      "26.1",
+      "26.1.1",
+      "26.1.2",
+      "26.2"
+    ],
+    "date_published": "2026-05-27T07:14:37.365816Z",
+    "files": [
+      {
+        "filename": "LuckPerms-Bukkit-5.5.53.jar",
+        "url": "https://cdn.modrinth.com/data/Vebnzrzj/versions/MBSY8toc/LuckPerms-Bukkit-5.5.53.jar",
+        "primary": true,
+        "hashes": {
+          "sha512": "a0e087adfc1c7b9fab8fdb5a430a3331a2ca30bfc72818bb7e65ce9baff051a1490834be8cbb9cbeda292f2e92c44cf03fb829ebeb233ade9d666ed908e49ad5",
+          "sha1": "dad091fbabe7cbb1db3dc1478eb1fe413520a014"
+        }
+      }
+    ]
+  },
+  {
+    "name": "v5.5.52 (NeoForge 26.1.2)",
+    "version_number": "v5.5.52-neoforge",
+    "loaders": [
+      "neoforge"
+    ],
+    "game_versions": [
+      "26.1",
+      "26.1.1",
+      "26.1.2"
+    ],
+    "date_published": "2026-05-27T07:10:35.317671Z",
+    "files": [
+      {
+        "filename": "LuckPerms-NeoForge-5.5.52.jar",
+        "url": "https://cdn.modrinth.com/data/Vebnzrzj/versions/j1irq8Ko/LuckPerms-NeoForge-5.5.52.jar",
+        "primary": true,
+        "hashes": {
+          "sha512": "9db03d8e5fc843b3a9befb47e8924268dc94c7b71724442dc603ea4910b8e0f3e9ddac4c8fbed48ecb2c4b05d5551d6c34c9c5e5048f967050053078430f38f2",
+          "sha1": "1dbe8d2dda814bd1fb1927042fe3dd4d39e71b9f"
+        }
+      }
+    ]
+  },
+  {
+    "name": "v5.5.52 (Fabric 26.1.2)",
+    "version_number": "v5.5.52-fabric",
+    "loaders": [
+      "fabric"
+    ],
+    "game_versions": [
+      "26.1",
+      "26.1.1",
+      "26.1.2"
+    ],
+    "date_published": "2026-05-27T07:10:17.309933Z",
+    "files": [
+      {
+        "filename": "LuckPerms-Fabric-5.5.52.jar",
+        "url": "https://cdn.modrinth.com/data/Vebnzrzj/versions/jlpCA3iL/LuckPerms-Fabric-5.5.52.jar",
+        "primary": true,
+        "hashes": {
+          "sha512": "30d4b7128ab7e34f41b34e69a9706f3e4a4fad2f2a3ea80e4ebd957c158e330c12ab618b926beb22d17bb9f97f642e524281cc9fa26347a5565611da34f60a03",
+          "sha1": "1d02305d71b2a10fa3664da4721d8fb940665bde"
+        }
+      }
+    ]
+  }
+]

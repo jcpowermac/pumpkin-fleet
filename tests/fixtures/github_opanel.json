@@ -1,0 +1,73 @@
+{
+  "tag_name": "2.2.11",
+  "name": "OPanel 2.2.11",
+  "published_at": "2026-11-24T14:28:44Z",
+  "prerelease": false,
+  "assets": [
+    {
+      "name": "opanel-fabric-1.19-build-2.2.11.jar",
+      "browser_download_url": "https://github.com/opanel-mc/opanel/releases/download/2.2.11/opanel-fabric-1.19-build-2.2.11.jar",
+      "size": 61446309
+    },
+    {
+      "name": "opanel-fabric-1.19.4-build-2.2.11.jar",
+      "browser_download_url": "https://github.com/opanel-mc/opanel/releases/download/2.2.11/opanel-fabric-1.19.4-build-2.2.11.jar",
+      "size": 61447553
+    },
+    {
+      "name": "opanel-fabric-1.20-build-2.2.11.jar",
+      "browser_download_url": "https://github.com/opanel-mc/opanel/releases/download/2.2.11/opanel-fabric-1.20-build-2.2.11.jar",
+      "size": 57038583
+    },
+    {
+      "name": "opanel-fabric-1.20.2-build-2.2.11.jar",
+      "browser_download_url": "https://github.com/opanel-mc/opanel/releases/download/2.2.11/opanel-fabric-1.20.2-build-2.2.11.jar",
+      "size": 57038104
+    },
+    {
+      "name": "opanel-fabric-1.20.3-build-2.2.11.jar",
+      "browser_download_url": "https://github.com/opanel-mc/opanel/releases/download/2.2.11/opanel-fabric-1.20.3-build-2.2.11.jar",
+      "size": 57038521
+    },
+    {
+      "name": "opanel-fabric-1.20.5-build-2.2.11.jar",
+      "browser_download_url": "https://github.com/opanel-mc/opanel/releases/download/2.2.11/opanel-fabric-1.20.5-build-2.2.11.jar",
+      "size": 57039038
+    },
+    {
+      "name": "opanel-fabric-1.21-build-2.2.11.jar",
+      "browser_download_url": "https://github.com/opanel-mc/opanel/releases/download/2.2.11/opanel-fabric-1.21-build-2.2.11.jar",
+      "size": 57093415
+    },
+    {
+      "name": "opanel-fabric-1.21.11-build-2.2.11.jar",
+      "browser_download_url": "https://github.com/opanel-mc/opanel/releases/download/2.2.11/opanel-fabric-1.21.11-build-2.2.11.jar",
+      "size": 57139010
+    },
+    {
+      "name": "opanel-fabric-1.21.2-build-2.2.11.jar",
+      "browser_download_url": "https://github.com/opanel-mc/opanel/releases/download/2.2.11/opanel-fabric-1.21.2-build-2.2.11.jar",
+      "size": 58218423
+    },
+    {
+      "name": "opanel-fabric-1.21.5-build-2.2.11.jar",
+      "browser_download_url": "https://github.com/opanel-mc/opanel/releases/download/2.2.11/opanel-fabric-1.21.5-build-2.2.11.jar",
+      "size": 59327254
+    },
+    {
+      "name": "opanel-fabric-1.21.9-build-2.2.11.jar",
+      "browser_download_url": "https://github.com/opanel-mc/opanel/releases/download/2.2.11/opanel-fabric-1.21.9-build-2.2.11.jar",
+      "size": 57131122
+    },
+    {
+      "name": "opanel-fabric-26.1-build-2.2.11.jar",
+      "browser_download_url": "https://github.com/opanel-mc/opanel/releases/download/2.2.11/opanel-fabric-26.1-build-2.2.11.jar",
+      "size": 59195151
+    },
+    {
+      "name": "opanel-forge-26.3-build-2.2.11.jar",
+      "browser_download_url": "https://github.com/opanel-mc/opanel/releases/download/2.2.11/opanel-forge-26.3-build-2.2.11.jar",
+      "size": 56868361
+    }
+  ]
+}

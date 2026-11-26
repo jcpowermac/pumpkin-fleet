@@ -11,20 +11,49 @@
         "name": "LuckPerms",
         "slug": "luckperms",
         "source": "modrinth",
-        "mc": ["26.3"],
-        "install_as": "LuckPerms.jar"
+        "mc": [
+          "26.3"
+        ],
+        "install_as": "LuckPerms.jar",
+        "version": "v5.5.71-bukkit",
+        "url": "https://cdn.modrinth.com/data/Vebnzrzj/versions/b0mk8uS6/LuckPerms-Bukkit-5.5.71.jar",
+        "sha256": "49cecb66fa1fd22a133039a490e9c1e5095a238e7cd66eb9d2a16fe6c897550d",
+        "deps": []
       },
       {
         "name": "ViaVersion",
         "slug": "viaversion",
         "source": "hangar",
-        "mc": ["26.3"],
-        "install_as": "ViaVersion.jar"
+        "mc": [
+          "26.3"
+        ],
+        "install_as": "ViaVersion.jar",
+        "version": "5.12.3",
+        "url": "https://hangarcdn.papermc.io/plugins/ViaVersion/ViaVersion/versions/5.12.3/PAPER/ViaVersion-5.12.3.jar",
+        "sha256": "8dec6b62c7ec4f355e59175fc8eaeb825719ae8d308723617097dcaab7073531",
+        "deps": [
+          {
+            "slug": "viabackwards",
+            "name": "ViaBackwards",
+            "required": false
+          },
+          {
+            "slug": "viarewind",
+            "name": "ViaRewind",
+            "required": false
+          }
+        ]
       }
     ],
     "excluded": [
-      {"name": "EssentialsX", "_note": "considered: no 26.3-compatible release yet"},
-      {"name": "Vault", "_note": "considered: no scriptable source (SpigotMC download needs a session)"}
+      {
+        "name": "EssentialsX",
+        "_note": "considered: no 26.3-compatible release yet"
+      },
+      {
+        "name": "Vault",
+        "_note": "considered: no scriptable source (SpigotMC download needs a session)"
+      }
     ]
   },
   {
@@ -60,22 +89,42 @@
         "name": "fabric-api",
         "slug": "FabricMC/fabric",
         "source": "github",
-        "mc": ["26.3"],
-        "install_as": "fabric-api.jar"
+        "mc": [
+          "26.3"
+        ],
+        "install_as": "fabric-api.jar",
+        "version": "0.167.0+26.3",
+        "url": "https://github.com/FabricMC/fabric-api/releases/download/0.167.0%2B26.3/fabric-api-0.167.0%2B26.3.jar",
+        "sha256": "ec6c9dbd884d68ae071fdc96cbdd91f2a5256bf3085a3b457e475827b31cad19",
+        "deps": []
       },
       {
         "name": "opanel",
         "slug": "opanel-mc/opanel",
         "source": "github",
-        "mc": ["26.3"],
-        "install_as": "opanel-fabric.jar"
+        "mc": [
+          "26.3"
+        ],
+        "install_as": "opanel-fabric.jar",
+        "version": "2.2.11",
+        "url": "https://github.com/opanel-mc/opanel/releases/download/2.2.11/opanel-fabric-26.1-build-2.2.11.jar",
+        "sha256": "d6cf3652986faafb5d277c22682da77c83a175c119973ece235ded8298032dd3",
+        "deps": [],
+        "note": "upstream ships no 26.3 fabric build; newest is opanel-fabric-26.1-build-2.2.11.jar (MC 26.1)",
+        "stale": true
       },
       {
         "name": "LuckPerms",
         "slug": "luckperms",
         "source": "modrinth",
-        "mc": ["26.3"],
-        "install_as": "LuckPerms.jar"
+        "mc": [
+          "26.3"
+        ],
+        "install_as": "LuckPerms.jar",
+        "version": "v5.5.85-fabric",
+        "url": "https://cdn.modrinth.com/data/Vebnzrzj/versions/DzQPkkXY/LuckPerms-Fabric-5.5.85.jar",
+        "sha256": "18598fcb95a83f6723d8bc68a905500ed5ecac92e9909ce1f25409cdebe2df49",
+        "deps": []
       }
     ],
     "_note": "Not yet resolved from this list: the Dockerfile still fetches the two github plugins by its own ADD lines (FABRIC_API / OPANEL args) and seeds them under their upstream filenames. Task 3 replaces that with the plugin build stage, which installs them as install_as."

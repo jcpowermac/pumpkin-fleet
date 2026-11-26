@@ -1,12 +1,16 @@
 """containers/images.json is the plugin manifest every later task reads.
 
 Contract being protected (docs/plan.md, fleet-plugin-gitops): an image is
-`name`/`version`/`args`/`plugins`; a plugin seed is `name`/`slug`/`source`/`mc`/
-`install_as`, and the resolver (Task 2) is what adds `version`/`url`/`sha256`.
+`name`/`version`/`args`/`plugins`; a plugin declares `name`/`slug`/`source`/`mc`/
+`install_as` and carries the `version`/`url`/`sha256` that scripts/resolve_plugins.py
+resolved from that declaration. A hand-edited artifact field here is a pin the build
+will not agree with.
 """
 import ast
 import json
+import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 REPO = Path(__file__).resolve().parent.parent
 IMAGES = {i["name"]: i for i in json.loads((REPO / "containers" / "images.json").read_text())}
@@ -18,8 +22,9 @@ VERSIONS = {
     "velocity": "4.3.1-45",
     "neoforge": "26.3.0.115",
 }
-# Task 2 fills these in; their absence here is what makes the manifest reviewable.
-UNRESOLVED = ("version", "url", "sha256")
+# What the resolver (Task 2) writes into every declared plugin.
+HEX64 = re.compile(r"^[0-9a-f]{64}$")
+ARTIFACT_HOSTS = {"hangar.papermc.io", "hangarcdn.papermc.io", "cdn.modrinth.com", "github.com"}
 
 
 def _workloads():
@@ -69,7 +74,24 @@ def test_plugin_images_carry_plugin_revision():
         assert IMAGES[name]["version"] == version, name
 
 
-def test_unresolved_fields_absent():
+def test_resolved_fields_present():
     for image_name, plugin in _plugins():
-        for field in UNRESOLVED:
-            assert field not in plugin, (image_name, plugin["name"], field)
+        assert HEX64.match(plugin["sha256"]), (image_name, plugin["name"])
+        host = urlparse(plugin["url"]).hostname
+        assert host in ARTIFACT_HOSTS, (image_name, plugin["name"], host)
+        assert plugin["version"], (image_name, plugin["name"])
+
+
+def test_only_fabric_opens_the_opanel_panel():
+    # The 3000/tcp firewall rule follows the image: OPanel is a fabric mod here, and
+    # papermc must not pick it up by accident.
+    declared = {name: {p["name"] for p in image.get("plugins", [])} for name, image in IMAGES.items()}
+    assert "opanel" in declared["fabric"]
+    assert "opanel" not in declared["papermc"]
+
+
+def test_excluded_plugins_stay_excluded():
+    excluded = {name: {e["name"] for e in image.get("excluded", [])} for name, image in IMAGES.items()}
+    assert excluded["papermc"] == {"EssentialsX", "Vault"}
+    for name, image in IMAGES.items():
+        assert not excluded[name] & {p["name"] for p in image.get("plugins", [])}, name
