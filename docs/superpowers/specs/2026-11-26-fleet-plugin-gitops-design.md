@@ -126,18 +126,25 @@ Volume=/srv/<node>/data:/data:Z
 Environment=EULA=true
 Environment=JAVA_MEMORY=<from WORKLOADS>
 AutoUpdate=registry
+RunInit=true
+PodmanArgs=--stop-timeout 60
 [Service]
 Restart=always
-StopTimeoutSec=60
+TimeoutStopSec=90
+[Install]
+WantedBy=default.target
 ```
 
 pyinfra (`tasks/gameserver.py` rewritten around this) owns: the data dir and its ownership
 (`podman unshare chown -R 1000:1000`, host chown of the dir first — both already documented in the
 current task), linger, `podman.socket`, firewalld ports, installing the unit + drop-in,
-`systemctl --user daemon-reload`, `systemctl --user enable --now <node>.service`, and
+`systemctl --user daemon-reload`, `systemctl --user start <node>.service` (quadlet units are
+transient: the generator applies `[Install]`, so `enable` on them is a systemd error and boot
+persistence comes from that generated link), and
 `systemctl --user enable --now podman-auto-update.timer` (user level, because the quadlets are user
 units). The current `_desired` pin-hash trick and `podman run` both go away: quadlet is the desired
-state, podman is the reconciler. `--init` is provided by quadlet's generated unit (`Delegate=yes`);
+state, podman is the reconciler. `RunInit=true` supplies the `--init` reaping (quadlet does not add
+`--init` on its own);
 verify the pumpkin PatchBukkit child-reaping concern is moot since pumpkin is out.
 
 Config is one unit file per image plus a per-node drop-in, so four nodes never need four hand-written
@@ -311,14 +318,26 @@ network path — 202 just needs its container and its firewalld port, which is w
 ### 8. Rebuild end to end (the redeploy)
 
 1. `configs/pins.env`: OS channel `pumpkin-os:stable`, FCOS import build pinned, node VMIDs/IPs as today.
-2. `scripts/fleet/20-create-nodes.sh` → ensure `pool/mcdata/<node>` exists (§2b), destroy the VM **with its OS disk
-   only** (`scsi0` detached first, or destroyed by name so the host-owned `scsi1` zvol is left alone), re-import the
-   pinned qcow2 for `scsi0`, re-attach `/dev/zvol/pool/mcdata/<node>` as `scsi1`, then start; each node rebases to
-   `pumpkin-os:stable` on first boot (~5–10 min, already the proven path).
-3. `uv run pyinfra inventory/hosts.py --group game_nodes tasks/gameserver.py` → quadlet units, dirs and
-   ownership, socket, firewalld, timers, enable+start.
-4. Verify: unit active, image digest matches `stable`, declared plugins loaded, mc-ping answers.
-5. OS updates then happen by themselves (§4); plugin updates only by merged bump PR (§6).
+2. `scripts/fleet/15-ensure-data-disks.sh` → create `pool/mcdata/<node>` and attach it as `scsi1` to the node **that is
+   still running** (§2b). Read-only decision pass first: it refuses rather than detach a `scsi1` that is something else.
+3. `uv run pyinfra inventory/hosts.py --limit <node> tasks/gameserver.py` → writes
+   `/etc/systemd/system/srv-<node>-data.mount`, formats the zvol if it is blank, and then **refuses** a
+   `/srv/<node>/data` that holds data and is not mounted yet. That refusal is the expected outcome of this step; the
+   unit it wrote is what the next step reads.
+4. On the node, server stopped: `scripts/fleet/25-migrate-data.sh <node>` → copy the old tree onto the zvol, verify it,
+   move the original to `/srv/<node>/data.pre-zvol` (never deleted), mount the zvol at the real path.
+5. `tasks/gameserver.py` again for that node → the volume is mounted, so it proceeds (ownership, container start).
+6. `scripts/fleet/20-create-nodes.sh` → **only now** destroys and re-imports the VM. It refuses the whole run, read-only,
+   if any node's `scsi1` is not `/dev/zvol/pool/mcdata/<node>` — a world still on `scsi0` goes with `--purge`. It
+   destroys `scsi0` and nothing else, re-imports the pinned qcow2, and re-attaches the host-owned zvol; each node
+   rebases to `pumpkin-os:stable` on first boot (~5–10 min, already the proven path).
+7. `tasks/gameserver.py` for all four again: the mount unit names a device path that only exists after the recreate.
+8. Verify: unit active, image digest matches `stable`, declared plugins loaded, mc-ping answers.
+9. OS updates then happen by themselves (§4); plugin updates only by merged bump PR (§6).
+
+Steps 2, 3, 5 and 7 are idempotent; step 4 refuses rather than overwrite; step 6 is the only irreversible one and it
+touches `scsi0` only. A rebuild that starts with step 6 destroys the worlds it was supposed to preserve — that is why
+the order is written down here and enforced in `20-create-nodes.sh`.
 
 **Prerequisites §8 must own, not assume** (raised by the builder check, checked against the repo): the FCOS fetch is
 already tracked (`scripts/spike/10-download-fcos.sh`) and already sha256-verifies the proxmoxve qcow2, but it must be

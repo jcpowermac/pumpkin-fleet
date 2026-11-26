@@ -181,11 +181,15 @@ runs again on every boot. After the first run the rebase is a no-op and the rebo
 **Fix:** guard at the top of the post-rebase branch:
 
 ```sh
-if rpm-ostree status --booted 2>/dev/null | grep -q 'ublue-os/ucore'; then
+if rpm-ostree status --booted 2>/dev/null | grep -q 'ghcr.io/jcpowermac/pumpkin-os'; then
   systemctl enable --now cockpit.service qemu-guest-agent.service 2>/dev/null || true
   exit 0
 fi
 ```
+
+The image name must come from `${UCORE_IMAGE}`, not be hardcoded: a node already booted on
+`pumpkin-os` that greps for `ublue-os/ucore` never matches, rebases to the same ref and
+reboots forever (templates/fleet.ign.butane:79 is the guarded form; §14 records the fix).
 
 ---
 
@@ -483,4 +487,10 @@ than `mkfs` over a world; and migrating a node's old `/srv/<node>/data` moves th
 aside to `data.pre-zvol` instead of deleting it. The in-guest `/dev/disk/by-id` name for a host
 zvol is still unverified on these nodes — until it is pinned, `data_device` falls back to
 `FLEET_DATA_DEV` and fails loudly rather than mounting the first disk it finds.
+
+**Unverified: hot-plug visibility.** The rebuild order runs `qm create` + `qm start` per node and
+only then `15-ensure-data-disks.sh`, so `scsi1` is hot-added to a VM that is already running.
+Whether the guest then sees the device (and its `/dev/disk/by-id` entry) without a reboot is
+**unverified**. Symptom if it does not: the deploy's format step fails on `test -b <device>`.
+The fix is `qm shutdown <vmid>` + `qm start <vmid>` for that node — never a different device.
 
