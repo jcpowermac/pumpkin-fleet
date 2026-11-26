@@ -178,6 +178,16 @@ def test_a_world_still_on_the_os_disk_stops_the_deploy_before_the_mount():
     assert unit < guard < mount
 
 
+def test_a_blank_device_is_formatted_before_the_unmigrated_world_guard():
+    """The only order that protects a world: the zvol is formatted first, so the guard can
+    refuse and 25-migrate-data.sh then finds a filesystem to mount. Formatted after the
+    guard, the migration dies in `mount` with "wrong fs type, bad option, bad superblock"."""
+    ops = commands(deploy_ops("plugins"))
+    formatted = next(i for i, c in enumerate(ops) if "mkfs.xfs" in c)
+    guard = next(i for i, c in enumerate(ops) if "25-migrate-data.sh" in c)
+    assert formatted < guard, ops
+
+
 def test_a_partition_table_with_no_filesystem_is_refused_not_formatted():
     """`blkid` reports PTTYPE but no TYPE for a partitioned device: in use, not blank."""
     blkid = f"DEVNAME={DATA_DEV}\nPTTYPE=gpt\nPTUUID=1234\n"

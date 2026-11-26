@@ -82,25 +82,17 @@ device = mount.data_device(
     render_quadlet.pin("FLEET_DATA_DEV"),
 )
 blkid = host.get_fact(Command, command=f"sudo blkid -o export {device} || true") or ""
+# Written before anything else uses it: 25-migrate-data.sh reads the device from this unit.
 _push(
     name=f"Install the {node} data mount unit",
     text=mount.mount_unit(node, device),
     dest=f"/etc/systemd/system/{data_unit}",
     sudo=True,
 )
-# Written before anything else uses it: 25-migrate-data.sh reads the device from this unit.
-# A non-empty data_dir that is not a mountpoint is a world still on the OS disk (the
-# pre-zvol layout). Mounting the unused zvol over it would hide that world and the server
-# would start on an empty one, so the deploy stops and names the migration step.
-server.shell(
-    name=f"Check {data_dir} is not an unmigrated world",
-    commands=(
-        f"mountpoint -q {data_dir} && exit 0; "
-        f'if [ -n "$(ls -A {data_dir})" ]; then '
-        f"echo '{data_dir} holds data but is not mounted — run scripts/fleet/25-migrate-data.sh {node} first'; "
-        "exit 1; fi"
-    ),
-)
+# Formatted *before* the guard below can refuse. On a node whose world is still on the OS
+# disk the deploy is expected to refuse, and it has to leave the zvol ready for
+# 25-migrate-data.sh to mount; with the format below the guard the migration dies in
+# `mount` with "wrong fs type, bad option, bad superblock" and never names the cause.
 if mount.needs_format(blkid):
     # mkfs.xfs (no -f) refuses a device that already carries a filesystem; the test -b
     # means a missing device fails here instead of becoming an empty world directory.
@@ -115,6 +107,19 @@ elif mount.filesystem_of(blkid) != "xfs":
     raise SystemExit(
         f"{device} carries {mount.filesystem_of(blkid)}, not xfs — refusing to format over it"
     )
+# A non-empty data_dir that is not a mountpoint is a world still on the OS disk (the
+# pre-zvol layout). Mounting the unused zvol over it would hide that world and the server
+# would start on an empty one, so the deploy stops and names the migration step. This stays
+# above the mount op: if a failed guard were ever continued past, the mount would be silent.
+server.shell(
+    name=f"Check {data_dir} is not an unmigrated world",
+    commands=(
+        f"mountpoint -q {data_dir} && exit 0; "
+        f'if [ -n "$(ls -A {data_dir})" ]; then '
+        f"echo '{data_dir} holds data but is not mounted — run scripts/fleet/25-migrate-data.sh {node} first'; "
+        "exit 1; fi"
+    ),
+)
 server.shell(
     name=f"Mount {data_dir} from {device}",
     commands=f"systemctl daemon-reload && systemctl enable --now {data_unit}",
