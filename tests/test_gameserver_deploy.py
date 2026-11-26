@@ -196,6 +196,16 @@ def test_a_partition_table_with_no_filesystem_is_refused_not_formatted():
     assert "partition-table" in str(refused.value) and "not xfs" in str(refused.value)
 
 
+def test_the_deploy_asserts_the_mount_is_active_before_it_starts_the_container():
+    """Fix 4(b): the unit's ConditionPathIsMountPoint is the boot-time guard; this is the
+    deploy-time one, and it names the failure instead of letting Paper create a new world."""
+    ops = commands(deploy_ops("plugins"))
+    asserted = next(i for i, c in enumerate(ops) if "is-active --quiet srv-plugins-data.mount" in c)
+    started = next(i for i, c in enumerate(ops) if "--user start plugins.service" in c)
+    assert asserted < started, ops
+    assert "generate a new world" in ops[asserted]
+
+
 def test_the_deploy_fails_when_the_volume_is_not_mounted():
     checks = [c for c in commands(deploy_ops("plugins")) if "is not a mountpoint" in c]
     assert checks, commands(deploy_ops("plugins"))

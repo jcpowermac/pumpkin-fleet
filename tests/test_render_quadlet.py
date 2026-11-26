@@ -57,6 +57,15 @@ def test_unit_never_names_latest():
         assert ":latest" not in unit(channel)
 
 
+def test_unit_never_starts_without_its_data_mount():
+    """A boot with the zvol missing or renamed leaves no /srv/<node>/data mount; the
+    container would bind-mount a plain directory on the disposable OS disk and Paper would
+    generate a fresh world into it. The condition stops the unit instead."""
+    text = unit()
+    unit_section = text.split("[Container]")[0]
+    assert "ConditionPathIsMountPoint=/srv/lobby/data" in unit_section
+
+
 def test_unit_is_a_rootless_user_unit_with_install_section():
     """`systemctl --user enable` is rejected for quadlet units (they are generated), so
     boot persistence has to come from the `[Install]` section the generator applies."""
@@ -80,7 +89,9 @@ def test_reboot_service_is_a_oneshot_running_the_gate():
     assert "lobby" in service
 
 
-def handover_calls(tmp_path, *, unit_active: bool, container_exists: bool) -> list[str]:
+def handover_calls(
+    tmp_path, *, unit_active: bool, container_exists: bool, container_running: bool = True
+) -> list[str]:
     """Run the emitted handover shell under bash with stub podman/systemctl on PATH.
 
     Substring assertions on the command would still pass with the guard inverted to
@@ -98,11 +109,14 @@ def handover_calls(tmp_path, *, unit_active: bool, container_exists: bool) -> li
         '  *) exit 1 ;;\n'
         'esac\n'
     )
+    # `podman stop` exits non-zero for a container that is already `exited`; the stub models
+    # that, so the `|| true` the handover needs is visible in the call log and the exit code.
     (stub / "podman").write_text(
         '#!/bin/sh\n'
         'echo "podman $*" >> "$CALL_LOG"\n'
-        'case "$1 $2" in\n'
-        '  "container exists") [ "$CONTAINER_EXISTS" = 1 ] ;;\n'
+        'case "$1" in\n'
+        '  container) [ "$CONTAINER_EXISTS" = 1 ] ;;\n'
+        '  stop) [ "$CONTAINER_RUNNING" = 1 ] ;;\n'
         '  *) : ;;\n'
         'esac\n'
     )
@@ -114,6 +128,7 @@ def handover_calls(tmp_path, *, unit_active: bool, container_exists: bool) -> li
         "CALL_LOG": str(log),
         "UNIT_ACTIVE": "1" if unit_active else "0",
         "CONTAINER_EXISTS": "1" if container_exists else "0",
+        "CONTAINER_RUNNING": "1" if container_running else "0",
     }
     result = subprocess.run(
         ["/bin/bash", "-c", render_quadlet.handover_command("lobby")],
@@ -142,6 +157,21 @@ def test_handover_stops_a_foreign_container_gracefully_before_removing_it(tmp_pa
         "podman rm lobby",
     ], calls
     assert "-f" not in calls[-2]
+
+
+def test_handover_still_removes_a_container_that_is_already_stopped(tmp_path):
+    """`podman stop` exits non-zero for a container already in state `exited` — the first
+    deploy after a crash or a hand stop. `stop && rm` skipped the rm and failed the deploy
+    with the old container still holding the name the unit needs."""
+    calls = handover_calls(tmp_path, unit_active=False, container_exists=True, container_running=False)
+    assert calls == [
+        "systemctl --user is-active --quiet lobby.service",
+        "podman container exists lobby",
+        "podman stop --time 60 lobby",
+        "podman rm lobby",
+    ], calls
+    # No -f anywhere: `podman rm` alone must still refuse a running container.
+    assert "-f" not in " ".join(calls)
 
 
 def test_handover_is_a_no_op_when_no_container_exists(tmp_path):

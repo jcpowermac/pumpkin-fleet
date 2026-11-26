@@ -220,6 +220,19 @@ _push(
 # Hand over any container an earlier `podman run` deploy left under this name: the unit
 # refuses to start while the name is taken, and `podman rm -f` would SIGKILL a loaded world.
 server.shell(name=f"Hand any pre-quadlet {node} container over to the unit", commands=render_quadlet.handover_command(node))
+# The unit's own ConditionPathIsMountPoint is the boot-time guard; this is the one the deploy
+# can prove. With the mount inactive the container bind-mounts a plain directory on the OS
+# disk and Paper generates a fresh world into it — nothing else would notice until the next
+# deploy refused with a message that could not be followed.
+server.shell(
+    name=f"{data_unit} is active before {node}.service starts",
+    commands=(
+        f"systemctl is-active --quiet {data_unit} || "
+        f"{{ echo '{data_unit} is not active — refusing to start {node}.service: it would "
+        f"bind-mount a plain directory on the OS disk and generate a new world'; exit 1; }}"
+    ),
+    _sudo=True,
+)
 # `start` on an already-running unit is a no-op, so a redeploy never bounces a live
 # server; a new image arrives through podman-auto-update.timer instead.
 server.shell(

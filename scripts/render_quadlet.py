@@ -32,9 +32,16 @@ def render_container_unit(
     node: str, image: str, channel: str, memory: str, java_memory: str, data_dir: str
 ) -> str:
     """`image` is the repository reference without a tag; `channel` is the tag to follow."""
+    # ConditionPathIsMountPoint is emitted in [Unit], which quadlet copies into the unit it
+    # generates: a boot with the zvol missing or renamed then leaves the container stopped
+    # instead of bind-mounting a plain directory on the OS disk and generating a new world.
+    # It is a *user* unit, so this is a heuristic unless quadlet really passes the key
+    # through (podman-systemd.unit(5) documents [Unit] keys as copied, but the generator is
+    # not exercised offline) — the deploy's `systemctl is-active <mount>` is the shipped guard.
     return f"""\
 [Unit]
 Description=pumpkin fleet {node} ({image}:{channel})
+ConditionPathIsMountPoint={data_dir}
 
 [Container]
 ContainerName={node}
@@ -127,5 +134,8 @@ def handover_command(node: str) -> str:
     return (
         f"systemctl --user is-active --quiet {node}.service && exit 0; "
         f"podman container exists {node} || exit 0; "
-        f"podman stop --time 60 {node} && podman rm {node}"
+        # `podman stop` fails on a container already in state `exited` (the first-deploy case
+        # after a crash or a hand stop), and `&&` would then skip the rm and fail the op.
+        # `podman rm` without -f still refuses a running container, so no SIGKILL.
+        f"podman stop --time 60 {node} || true; podman rm {node}"
     )
