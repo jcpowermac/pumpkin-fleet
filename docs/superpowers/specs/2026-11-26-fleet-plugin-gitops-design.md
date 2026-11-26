@@ -218,7 +218,7 @@ OPanel entry already used. Not a second file: two places declaring the same jars
     "target": "image", "install_as": "LuckPerms.jar",
     "sha256": "<computed once, committed>",
     "upstream_hashes": { "sha1": "fc8bb991…", "sha512": "188a91f0…" },
-    "mc": ["26.3"], "deps": [], "note": "…" } ] }
+    "mc": ["26.3"], "deps": [], "_note": "…" } ] }
 ```
 
 - `source` ∈ `hangar | modrinth | github | manual`. Hangar gives sha256 natively; modrinth/github give
