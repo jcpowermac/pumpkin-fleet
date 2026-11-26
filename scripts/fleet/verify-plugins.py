@@ -133,7 +133,13 @@ def read_until_started(command: str, timeout: float) -> tuple[str, str | None]:
         elif STARTUP_COMPLETE in run.stdout:
             return run.stdout, None
         else:
-            error = None
+            # Not seeing the startup line is a finding of its own, not a clean log: a jar that
+            # kills the JVM never gets there, and `verdict()` only reads the jars and the
+            # failure signatures, so a dead server would otherwise write a persistent `ok`.
+            error = (
+                f"the server never printed {STARTUP_COMPLETE!r} within {timeout:g}s — "
+                "it may be dead, so the declared jars could not be checked"
+            )
         if time.monotonic() >= deadline:
             return run.stdout, error
         time.sleep(POLL_SECONDS)

@@ -45,7 +45,7 @@ fi
 echo "unit: $(systemctl --user is-active {node}.service)"
 echo "expected jars $(ls /etc/fleet/expected-plugins.*.txt): $(cat /etc/fleet/expected-plugins.*.txt | tr '\\n' ' ')"
 echo "jars in {data_dir}: $(find {data_dir}/plugins {data_dir}/mods -maxdepth 1 -type f -name '*.jar' -printf '%f ' 2>/dev/null)"
-timeout 10 /usr/bin/python3 /usr/local/lib/fleet/mc-ping.py 127.0.0.1 25565 || echo "mc-ping: no answer on 25565"
+timeout 10 /usr/bin/python3 /usr/local/lib/fleet/mc-ping.py 127.0.0.1 25565 || {{ echo "mc-ping: no answer on 25565 — the server is not answering"; exit 1; }}
 """,
 )
 

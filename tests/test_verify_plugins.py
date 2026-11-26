@@ -226,6 +226,29 @@ def test_status_file_names_the_failing_log_line(tmp_path):
     assert "Could not load plugin ViaBackwards" in status
 
 
+def test_a_server_that_never_says_done_is_not_ok(tmp_path):
+    """A jar that kills the JVM leaves a short log with no `Done (` line. Evaluating that as
+    clean writes a persistent `ok` to /run/fleet-verify.status while the server is dead, so
+    tasks/verify.py prints "no answer" and the gate stays green forever."""
+    silent = "[12:00:01 INFO]: Starting minecraft server version Paper 26.3\n"
+    out, status = run_cli(tmp_path, sorted(DECLARED), silent, extra_args=["--startup-timeout", "0"])
+    assert out.returncode == 0, out.stderr
+    assert status != "ok\n", status
+    assert "failure: the server never printed" in status, status
+
+
+def test_the_never_started_failure_is_distinct_from_a_plugin_failure(tmp_path):
+    """Both can be true at once: the plugin failure is the cause, the missing startup line
+    is what proves it never finished. They must not read as the same problem."""
+    truncated = FAILING.split("Done (")[0]
+    out, status = run_cli(
+        tmp_path, sorted(DECLARED), truncated, extra_args=["--startup-timeout", "0"]
+    )
+    assert out.returncode == 0, out.stderr
+    assert "failure: the server never printed" in status, status
+    assert "Could not load plugin ViaBackwards" in status, status
+
+
 def test_a_log_without_the_startup_line_is_still_evaluated(tmp_path):
     """The deploy starts the check as soon as the port opens, which is before plugins
     finish loading: the check waits for `Done (` first, but the wait is bounded, so a log
