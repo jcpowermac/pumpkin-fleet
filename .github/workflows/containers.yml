@@ -14,8 +14,16 @@ name: containers
 #     version tag ghcr.io already has, and picks the matrix: an image whose entry did
 #     not change is skipped, so its tag is never rebuilt with a new digest.
 #   * A merge builds <image>:<version> and <image>:stable-next. Only the canary node
-#     follows stable-next; a human then dispatches `promote`, which moves <image>:stable
-#     to that same digest. stable/stable-next are the only moving tags.
+#     follows stable-next; a human then dispatches with that digest, and scripts/promote.sh
+#     moves <image>:stable to it. stable/stable-next are the only moving tags.
+#
+# workflow_dispatch is the human lever, and the two inputs are read separately:
+#   * image only  -> force that image into the matrix even though its entry did not change.
+#     This is what seeds a channel for an image whose entry never changes (velocity,
+#     neoforge) and what rebuilds after a Dockerfile-only fix. It does re-publish that
+#     image's version tag with a new digest: that is the point, and it is a human decision.
+#   * image + digest -> promote. The digest must match one of the image's published tags,
+#     so naming an older version tag's digest is the rollback that a reverted PR needs.
 
 on:
   push:
@@ -30,12 +38,12 @@ on:
   workflow_dispatch:
     inputs:
       image:
-        description: image name to promote (images.json name, e.g. papermc)
-        required: true
+        description: image name from images.json (e.g. papermc) — force-build it, or promote it with a digest
+        required: false
         type: string
       digest:
-        description: sha256 digest of that image's stable-next to promote to stable
-        required: true
+        description: sha256 digest of a tag CI published for that image (its stable-next to promote, or an older version tag to roll back to)
+        required: false
         type: string
 
 permissions:
@@ -56,14 +64,14 @@ jobs:
           fetch-depth: 0
 
       - id: gate
-        # A dispatch run is a promote, not a build, so there is nothing to gate or matrix.
-        if: github.event_name != 'workflow_dispatch'
         env:
           BASE: ${{ github.event.before || github.event.pull_request.base.sha }}
+          FORCE: ${{ github.event.inputs.image }}
         run: |
           git show "${BASE:-HEAD^}:containers/images.json" > /tmp/base.json
           uv run python scripts/ci_gate.py \
-            --base /tmp/base.json --head containers/images.json --matrix > /tmp/matrix.json
+            --base /tmp/base.json --head containers/images.json \
+            --matrix --force-image "$FORCE" > /tmp/matrix.json
           echo "images=$(cat /tmp/matrix.json)" >> "$GITHUB_OUTPUT"
 
       # Docker requires a lowercase repository name; GitHub owners may not be.
@@ -72,8 +80,9 @@ jobs:
 
   build:
     needs: matrix
-    # A dispatch is promote-only: rebuilding here would re-push tags the merge already published.
-    if: github.event_name != 'workflow_dispatch'
+    # A dispatch with no image input is a promote run: rebuilding here would re-push tags
+    # the merge already published.
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.image != ''
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -129,14 +138,17 @@ jobs:
             org.opencontainers.image.version=${{ matrix.image.version }}
             org.opencontainers.image.revision=${{ github.sha }}
 
-  # stable is the tag every node pulls, and it moves only here. The dispatcher reads the
-  # digest off the build run and names it; stable is set to that exact digest, never to a
-  # tag or an image CI did not build. A stale or mistyped digest fails the comparison.
+  # stable is the tag every node pulls, and it moves only here. The dispatcher names a digest;
+  # scripts/promote.sh accepts it only if it is the digest ghcr.io already serves for a tag CI
+  # published of that image — stable-next for a forward promote, an older version tag for the
+  # rollback a reverted PR needs (spec §1). A digest matching none of them aborts the job.
   promote:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.digest != ''
     needs: matrix
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Log in to ghcr.io
         uses: docker/login-action@v3
         with:
@@ -144,27 +156,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Promote stable-next to stable
+      - name: Promote stable to a digest CI published
         env:
           PREFIX: ${{ needs.matrix.outputs.prefix }}
           IMAGE: ${{ github.event.inputs.image }}
           DIGEST: ${{ github.event.inputs.digest }}
-        run: |
-          if ! [[ "$IMAGE" =~ ^[a-z0-9-]+$ ]]; then
-            echo "image must be an images.json image name" >&2; exit 1
-          fi
-          digest="${DIGEST#sha256:}"
-          if ! [[ "$digest" =~ ^[0-9a-f]{64}$ ]]; then
-            echo "digest must be a 64-hex sha256" >&2; exit 1
-          fi
-
-          docker pull "$PREFIX/$IMAGE:stable-next"
-          built="$(docker inspect --format '{{index .RepoDigests 0}}' "$PREFIX/$IMAGE:stable-next")"
-          if [[ "$built" != *"@sha256:$digest" ]]; then
-            echo "refusing: $PREFIX/$IMAGE:stable-next is at ${built##*@}, not sha256:$digest" >&2
-            exit 1
-          fi
-
-          # Tag the verified digest itself, not the floating stable-next tag.
-          docker tag "$built" "$PREFIX/$IMAGE:stable"
-          docker push "$PREFIX/$IMAGE:stable"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/promote.sh

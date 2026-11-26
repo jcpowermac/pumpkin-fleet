@@ -11,9 +11,13 @@ comparing a manifest with itself is how a re-run and an annotation-only edit bot
 changed() is the build matrix: the head entries whose identity or version actually
 moved, plus images with no base entry at all. An untouched image is skipped rather than
 rebuilt, because rebuilding it publishes a new digest under a tag ghcr.io already has.
+force= is the workflow_dispatch escape hatch (Ruling 4b): one image named by a human is
+built regardless of the diff, which is how an image whose entry never changes gets a
+channel and how a Dockerfile-only fix gets a build.
 
-  ci_gate.py --base <path> --head <path> [--matrix]   exit 1 on any GateError
-  --matrix prints the JSON array of images to build (one line, for the Actions matrix)
+  ci_gate.py --base <path> --head <path> [--matrix] [--force-image <name>]
+  exit 1 on any GateError; --matrix prints the JSON array of images to build (one line,
+  for the Actions matrix)
 """
 from __future__ import annotations
 
@@ -97,14 +101,16 @@ def gate(base: list[dict], head: list[dict]) -> list[GateError]:
     return errors
 
 
-def changed(base: list[dict], head: list[dict]) -> list[dict]:
+def changed(base: list[dict], head: list[dict], force: str | None = None) -> list[dict]:
     built = {i["name"]: i for i in base}
     out = []
     for image in head:
         previous = built.get(image["name"])
-        if previous is None or (previous.get("version"), build_identity(previous)) != (
-            image.get("version"),
-            build_identity(image),
+        if (
+            image["name"] == force
+            or previous is None
+            or (previous.get("version"), build_identity(previous))
+            != (image.get("version"), build_identity(image))
         ):
             out.append(image)
     return out
@@ -115,17 +121,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base", type=Path, required=True, help="manifest CI already published")
     parser.add_argument("--head", type=Path, required=True, help="manifest CI is about to build")
     parser.add_argument("--matrix", action="store_true", help="print the images to build as JSON")
+    parser.add_argument("--force-image", default="", help="image to build even if its entry is unchanged")
     args = parser.parse_args(argv)
 
     base = json.loads(args.base.read_text())
     head = json.loads(args.head.read_text())
     errors = gate(base, head)
+    if args.force_image and args.force_image not in {i["name"] for i in head}:
+        errors.append(GateError(args.force_image, "not an image in the manifest — a forced dispatch name is a typo"))
     for error in errors:
         print(f"{error.image}: {error.message}", file=sys.stderr)
     if errors:
         return 1
     if args.matrix:
-        print(json.dumps(changed(base, head), separators=(",", ":")))
+        print(json.dumps(changed(base, head, args.force_image or None), separators=(",", ":")))
     return 0
 
 

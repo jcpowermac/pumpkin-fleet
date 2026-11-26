@@ -114,8 +114,20 @@ Notes:
 
 1. Edit the version and sha256 in `images.json` (fabric: the MC/loader/API/OPanel
    versions — it carries no sha256). A changed `plugins` list means a new version
-   revision: `26.3-258` -> `26.3-258-p1`, because a version tag is never re-pushed.
-2. Open a PR. The workflow builds all four and pushes only on `main`, so a PR proves it builds.
-3. Merge, then point `configs/pins.env` at the new tag and deploy.
+   revision: `26.3-258` -> `26.3-258-p1`, because a version tag is never re-pushed. A
+   server version change carries the suffix too (`26.4-300` -> `26.4-300-p1`): an image
+   that ships plugins always names its plugin revision, which is what makes a promotion
+   readable from the tag alone.
+2. Open a PR. `scripts/ci_gate.py` refuses a `plugins`/args change that leaves the version
+   alone, and the matrix is only the images whose entry changed — an untouched image is
+   never rebuilt under its own published tag.
+3. Merge. CI builds `<image>:<version>` and `<image>:stable-next`; the canary node follows
+   `stable-next`, then a `workflow_dispatch` naming that digest moves `<image>:stable`, and
+   the rest of the fleet converges on its podman timer. Rolling back is the same dispatch
+   with an older version tag's digest.
+4. `workflow_dispatch` with only an `image` forces that image into the matrix even when its
+   entry did not change — how a channel gets seeded for an image whose entry never changes,
+   and how a Dockerfile-only fix gets built. It re-publishes that image's version tag with a
+   new digest, so it is a deliberate lever rather than the everyday path.
 
 Nothing resolves a moving tag, so a running fleet is unaffected until the pins change.

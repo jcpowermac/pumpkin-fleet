@@ -158,6 +158,26 @@ def test_annotation_only_edits_never_rebuild_a_published_tag():
     assert ci_gate.gate([_image()], [_image(plugins=annotated)]) == []
 
 
+def test_a_forced_dispatch_image_is_built_even_when_unchanged():
+    # Ruling 4b: a forced dispatch is how a channel gets seeded for an image whose entry
+    # never changes (velocity, neoforge) and how a Dockerfile-only fix gets built.
+    manifest = [_image(), _velocity()]
+    assert ci_gate.changed(manifest, manifest) == []
+    assert [i["name"] for i in ci_gate.changed(manifest, manifest, force="velocity")] == ["velocity"]
+
+
+def test_an_empty_dispatch_input_changes_nothing():
+    manifest = [_image(), _velocity()]
+    assert ci_gate.changed(manifest, manifest, force="") == []
+    assert ci_gate.changed(manifest, manifest, force=None) == []
+
+
+def test_a_forced_dispatch_still_skips_the_other_unchanged_images():
+    moved = _image(version="26.3-258-p2", plugins=_plugin(sha256=SHA_C))
+    built = ci_gate.changed([_image(), _velocity()], [moved, _velocity()], force="velocity")
+    assert [i["name"] for i in built] == ["papermc", "velocity"]
+
+
 def test_a_legacy_base_manifest_does_not_crash_the_gate():
     # images.json on main before Task 2 declared plugins as bare names, so the first gated
     # merge compares against that shape.
@@ -174,6 +194,26 @@ def test_cli_exits_1_and_names_the_breach(tmp_path, capsys):
     assert ci_gate.main(["--base", str(base), "--head", str(head)]) == 1
     err = capsys.readouterr().err
     assert "papermc" in err and "26.3-258-p1" in err
+
+
+def test_cli_force_image_adds_an_unchanged_image(tmp_path, capsys):
+    manifest = json.dumps([_image(), _velocity()])
+    base, head = tmp_path / "base.json", tmp_path / "head.json"
+    base.write_text(manifest)
+    head.write_text(manifest)
+    argv = ["--base", str(base), "--head", str(head), "--matrix", "--force-image", "velocity"]
+    assert ci_gate.main(argv) == 0
+    assert [i["name"] for i in json.loads(capsys.readouterr().out)] == ["velocity"]
+
+
+def test_cli_rejects_a_force_image_that_is_not_in_the_manifest(tmp_path, capsys):
+    manifest = json.dumps([_image(), _velocity()])
+    base, head = tmp_path / "base.json", tmp_path / "head.json"
+    base.write_text(manifest)
+    head.write_text(manifest)
+    argv = ["--base", str(base), "--head", str(head), "--matrix", "--force-image", "pumpkin"]
+    assert ci_gate.main(argv) == 1
+    assert "pumpkin" in capsys.readouterr().err
 
 
 def test_cli_matrix_prints_only_the_images_to_build(tmp_path, capsys):
