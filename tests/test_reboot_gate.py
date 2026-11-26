@@ -7,18 +7,73 @@ other half is that a server that is not answering does NOT block — an unreacha
 server is not hosting players — which is a tradeoff, not an oversight (report §).
 """
 import importlib.util
+import json
+import socket
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 GATE = REPO / "scripts" / "fleet" / "reboot-gate.py"
+MC_PING = REPO / "scripts" / "mc-ping.py"
 
 _spec = importlib.util.spec_from_file_location("reboot_gate", GATE)
 reboot_gate = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(reboot_gate)
+
+
+def varint(n: int) -> bytes:
+    out = b""
+    while True:
+        b = n & 0x7F
+        n >>= 7
+        if n:
+            out += bytes([b | 0x80])
+        else:
+            return out + bytes([b])
+
+
+def status_server(payload: dict):
+    """A one-shot server speaking the status protocol, so mc-ping.py is exercised for real."""
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    port = listener.getsockname()[1]
+
+    def serve():
+        conn, _ = listener.accept()
+        with conn:
+            conn.settimeout(5)
+            seen = b""
+            while not seen.endswith(b"\x01\x00"):  # handshake, then the status request
+                chunk = conn.recv(4096)
+                if not chunk:
+                    return
+                seen += chunk
+            text = json.dumps(payload).encode()
+            conn.sendall(varint(len(varint(0) + varint(len(text)) + text)) + varint(0) + varint(len(text)) + text)
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    return port, listener
+
+
+def ping_payload(payload: dict) -> dict:
+    port, listener = status_server(payload)
+    try:
+        out = subprocess.run(
+            [sys.executable, "-I", str(MC_PING), "127.0.0.1", str(port)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    finally:
+        listener.close()
+    assert out.returncode == 0, (out.returncode, out.stdout, out.stderr)
+    return json.loads(out.stdout)
 
 
 def test_online_players_block_the_reboot(capsys):
@@ -43,6 +98,31 @@ def test_a_status_without_a_player_count_skips_the_reboot(capsys):
     assert reboot_gate.should_reboot({"version": {"name": "Paper", "protocol": 777}}) is False
     assert reboot_gate.should_reboot({"players": None}) is False
     assert "no player count" in capsys.readouterr().out
+
+
+def test_a_payload_with_players_but_no_description_or_version_still_blocks_the_reboot(capsys):
+    """A status-rewriting plugin, a proxy or a version skew can answer with a partial
+    payload. mc-ping.py used to KeyError on `description`/`version` before it ever looked at
+    `players`, exit non-zero, and turn five players into "not answering" → reboot."""
+    partial = {"players": {"online": 5, "max": 20}}
+    printed = ping_payload(partial)
+    assert printed["players"] == {"online": 5, "max": 20}
+    assert printed["description"] is None and printed["version"] is None
+    assert reboot_gate.should_reboot(printed) is False
+    assert "skip: 5 players online" in capsys.readouterr().out
+
+
+def test_a_payload_with_no_players_reports_null_and_skips(capsys):
+    printed = ping_payload({"description": "a server", "version": {"name": "Paper"}})
+    assert printed["players"] is None
+    assert reboot_gate.should_reboot(printed) is False
+    assert "no player count" in capsys.readouterr().out
+
+
+def test_an_empty_server_still_allows_the_reboot_through_mc_ping(capsys):
+    printed = ping_payload({"players": {"online": 0, "max": 20}, "version": {"name": "Paper"}})
+    assert reboot_gate.should_reboot(printed) is True
+    assert "reboot allowed" in capsys.readouterr().out
 
 
 def test_dry_run_prints_the_decision_and_does_not_reboot():

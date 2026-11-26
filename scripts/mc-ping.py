@@ -72,10 +72,13 @@ def main() -> None:
     _, i1 = rd_varint_from(body)        # packet id
     _, i2 = rd_varint_from(body[i1:])   # string length
     status = json.loads(body[i1 + i2:])
-    desc = status["description"]
+    # .get(), not []: a status-rewriting plugin, a proxy or a version skew can answer without
+    # `description`/`version`, and a KeyError here exits 1 *before* the player count is
+    # looked at — which the reboot gate reads as "not answering, nobody is playing".
+    desc = status.get("description")
     print(json.dumps({
-        "version": status["version"],
-        "players": status["players"],
+        "version": status.get("version"),
+        "players": status.get("players"),
         "description": desc.get("text") if isinstance(desc, dict) else desc,
     }, indent=2))
 
