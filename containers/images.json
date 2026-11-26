@@ -1,7 +1,7 @@
 [
   {
     "name": "papermc",
-    "version": "26.3-258-p1",
+    "version": "26.3-258-p2",
     "args": {
       "PAPER_VERSION": "26.3-258",
       "PAPER_SHA256": "c5df5fb9f6155e48380c67c6e2b2dc2581b7db1a4b665d2c3818057b7efb6692"
@@ -41,6 +41,54 @@
             "slug": "viarewind",
             "name": "ViaRewind",
             "required": false
+          }
+        ]
+      },
+      {
+        "name": "ViaBackwards",
+        "slug": "viabackwards",
+        "source": "hangar",
+        "mc": [
+          "26.3"
+        ],
+        "install_as": "ViaBackwards.jar",
+        "version": "5.12.3",
+        "url": "https://hangarcdn.papermc.io/plugins/ViaVersion/ViaBackwards/versions/5.12.3/PAPER/ViaBackwards-5.12.3.jar",
+        "sha256": "81a1ef49567f76ba4ad43f7489080bc580e3fcf3d9601b7e852820ed4b6cecc7",
+        "deps": [
+          {
+            "slug": "viaversion",
+            "name": "ViaVersion",
+            "required": true
+          },
+          {
+            "slug": "viarewind",
+            "name": "ViaRewind",
+            "required": false
+          }
+        ]
+      },
+      {
+        "name": "ViaRewind",
+        "slug": "viarewind",
+        "source": "hangar",
+        "mc": [
+          "26.3"
+        ],
+        "install_as": "ViaRewind.jar",
+        "version": "4.2.0",
+        "url": "https://hangarcdn.papermc.io/plugins/ViaVersion/ViaRewind/versions/4.2.0/PAPER/ViaRewind-4.2.0.jar",
+        "sha256": "f5113ea939353fec6170e6d1b7d2326fab76fa8d0cee594f689796995fc96720",
+        "deps": [
+          {
+            "slug": "viaversion",
+            "name": "ViaVersion",
+            "required": true
+          },
+          {
+            "slug": "viabackwards",
+            "name": "ViaBackwards",
+            "required": true
           }
         ]
       }

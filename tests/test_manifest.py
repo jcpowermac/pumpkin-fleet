@@ -17,7 +17,7 @@ IMAGES = {i["name"]: i for i in json.loads((REPO / "containers" / "images.json")
 SOURCES = {"hangar", "modrinth", "github", "manual"}
 # Exact seed values from the plan: bumping an image's plugin list bumps its version.
 VERSIONS = {
-    "papermc": "26.3-258-p1",
+    "papermc": "26.3-258-p2",
     "fabric": "26.3-0.20.1-p1",
     "velocity": "4.3.1-45",
     "neoforge": "26.3.0.115",
@@ -95,3 +95,13 @@ def test_excluded_plugins_stay_excluded():
     assert excluded["papermc"] == {"EssentialsX", "Vault"}
     for name, image in IMAGES.items():
         assert not excluded[name] & {p["name"] for p in image.get("plugins", [])}, name
+
+
+def test_papermc_plugin_set_is_exact():
+    # ViaBackwards and ViaRewind are declared here rather than conjured by the resolver:
+    # Hangar calls them optional dependencies of ViaVersion, which describes ViaVersion's
+    # packaging, not what this fleet wants loaded (older clients need ViaBackwards).
+    assert {p["name"] for p in IMAGES["papermc"]["plugins"]} == {
+        "LuckPerms", "ViaVersion", "ViaBackwards", "ViaRewind"}
+    assert {p["install_as"] for p in IMAGES["papermc"]["plugins"]} == {
+        "LuckPerms.jar", "ViaVersion.jar", "ViaBackwards.jar", "ViaRewind.jar"}

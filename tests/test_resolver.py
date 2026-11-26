@@ -159,6 +159,27 @@ def test_required_dependency_becomes_a_manifest_entry(monkeypatch):
     assert [q["install_as"] for q in again] == ["Foo.jar", "ViaBackwards.jar"]
 
 
+def test_a_declared_dependency_is_never_added_again(monkeypatch):
+    """The fleet declares ViaBackwards by hand (containers/images.json), and Hangar reports
+    ViaVersion as a *required* dependency of ViaBackwards: the closure must not re-add a plugin
+    the manifest already names."""
+    monkeypatch.setattr(rp, "fetch_json", _fetch({
+        "projects/viaversion/versions": _fixture("hangar_viaversion.json"),
+        "projects/viabackwards/versions": _synthetic_hangar(False),
+        "projects/12": _fixture("hangar_dep_projects.json")["12"],
+        "projects/112": _fixture("hangar_dep_projects.json")["112"],
+    }))
+    via = {"name": "ViaVersion", "slug": "viaversion", "source": "hangar", "mc": ["26.3"],
+           "install_as": "ViaVersion.jar"}
+    backwards = {"name": "ViaBackwards", "slug": "viabackwards", "source": "hangar",
+                 "mc": ["26.3"], "install_as": "ViaBackwards.jar"}
+    image = {"name": "papermc", "version": "26.3-258-p2", "plugins": [dict(via), dict(backwards)]}
+    plugins = rp.resolve_manifest([image], image)
+    assert [q["install_as"] for q in plugins] == ["ViaVersion.jar", "ViaBackwards.jar"]
+    assert plugins[1]["version"] == "1.0", "resolved from its own slug, not via ViaVersion's deps"
+    assert {d["slug"] for d in plugins[0]["deps"]} == {"viabackwards", "viarewind"}
+
+
 def test_modrinth_filters_by_loader_and_game_version(monkeypatch):
     fx = _fixture("modrinth_luckperms.json")
     monkeypatch.setattr(rp, "fetch_json", _fetch({"project/luckperms/version": fx}))

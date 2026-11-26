@@ -18,6 +18,12 @@ and the computed digest is what gets committed.
 
 Tests replace the two I/O seams `fetch_json` (API JSON) and `sha256_of_url` (artifact
 download); nothing else touches the network.
+
+Two signatures differ from the plan's sketch deliberately: `resolve_github` takes the image's
+loader, because a GitHub release declares neither loader nor MC version and repos like OPanel ship
+one jar per loader+MC (39 assets in one release), so picking an asset without the loader would put
+a forge jar on a Fabric node; and `resolve_manifest` takes an optional `problems` list so a
+per-image call can surface incompatibilities without a module-level accumulator.
 """
 from __future__ import annotations
 
