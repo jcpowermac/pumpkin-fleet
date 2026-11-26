@@ -47,16 +47,20 @@ Why one base, and why this one:
    from a ZFS dataset. Swapping a server version is a new image tag, never an in-place edit.
 2. **Every artifact is sha256-pinned** via `ADD --checksum`, where the publisher gives us
    one. A moved or tampered upstream asset fails the build instead of shipping. Paper and
-   Velocity are self-verifying: their fill-data object id *is* the file's SHA-256. The two
-   exceptions are `neoforge` and `fabric`, which resolve a whole dependency tree from an
-   installer at build time — those pin only versions, so a rebuild picks up whatever
-   upstream currently serves for that exact version.
+   Velocity are self-verifying: their fill-data object id *is* the file's SHA-256. Plugin
+   jars from `images.json` go through a `plugins` build stage instead — `curl` then
+   jars from `images.json` go through a `plugins` build stage instead: `curl`, then
+   `sha256sum -c` against the manifest's pin. Only `neoforge` and `fabric` are looser —
+   their installer resolves a whole dependency tree at build time, so those pin versions
+   only and a rebuild picks up whatever upstream currently serves for that version.
 3. **No `latest` tag.** Every image is tagged with an exact version so a deploy can never
    change under a running server.
 4. **Runs as uid/gid 1000**, non-root, so the bind-mounted dataset is the only thing it
    can write.
-5. **Data dirs are seeded once, never overwritten.** If a file already exists on the
-   volume it is left alone — the volume always wins.
+5. **Data dirs converge, and the volume always wins.** `lib/plugin-seed.sh` lands the
+   image's plugin jars on the volume at every start, but never replaces a jar already
+   there; it only retires a jar a previous fleet image put there that this one no longer
+   bundles. Everything else on the volume is left alone.
 
 ## JVM flags
 

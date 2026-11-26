@@ -127,10 +127,7 @@
     "version": "26.3-0.20.1-p1",
     "args": {
       "FABRIC_MC": "26.3",
-      "FABRIC_LOADER": "0.20.1",
-      "FABRIC_API": "0.167.0+26.3",
-      "OPANEL_VERSION": "2.2.11",
-      "OPANEL_ASSET": "opanel-fabric-26.1-build-2.2.11.jar"
+      "FABRIC_LOADER": "0.20.1"
     },
     "plugins": [
       {
@@ -175,6 +172,6 @@
         "deps": []
       }
     ],
-    "_note": "Not yet resolved from this list: the Dockerfile still fetches the two github plugins by its own ADD lines (FABRIC_API / OPANEL args) and seeds them under their upstream filenames. Task 3 replaces that with the plugin build stage, which installs them as install_as."
+    "_note": "Every plugin here is baked by the image's plugins stage, sha256-gated, and lands in /opt/bundled-mods under install_as; the entrypoint then seeds them into /data/mods, where a jar the volume already holds is never replaced."
   }
 ]

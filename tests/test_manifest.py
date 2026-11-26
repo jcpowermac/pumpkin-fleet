@@ -97,6 +97,19 @@ def test_excluded_plugins_stay_excluded():
         assert not excluded[name] & {p["name"] for p in image.get("plugins", [])}, name
 
 
+def test_plugin_declaring_images_bake_them():
+    # CI passes PLUGIN_TRIPLETS to every image, so the manifest and the Dockerfile have
+    # to agree: an image with declared plugins but no plugins stage would ignore the arg
+    # and ship a server with none of them, and an image without plugins must not carry
+    # the stage, because the stage refuses an empty arg.
+    for name, image in IMAGES.items():
+        dockerfile = (REPO / "containers" / name / "Dockerfile").read_text()
+        if image.get("plugins"):
+            assert "AS plugins" in dockerfile and "PLUGIN_TRIPLETS" in dockerfile, name
+        else:
+            assert "PLUGIN_TRIPLETS" not in dockerfile, name
+
+
 def test_papermc_plugin_set_is_exact():
     # ViaBackwards and ViaRewind are declared here rather than conjured by the resolver:
     # Hangar calls them optional dependencies of ViaVersion, which describes ViaVersion's

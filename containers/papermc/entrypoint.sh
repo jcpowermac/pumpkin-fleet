@@ -1,5 +1,8 @@
 #!/bin/sh
 set -eu
+# Converge /data/plugins onto the jars baked into the image before Paper scans it.
+. /opt/lib/plugin-seed.sh
+seed_plugins /opt/plugins /data/plugins fleet-plugins
 if [ "${EULA:-false}" = "true" ]; then echo "eula=true" > /data/eula.txt; fi
 # Flags follow exa.y2k.diy/garden/jvm-args for Java 25 / Minecraft 26.1+:
 # ZGC (sub-ms pauses, scales with heap) and compact object headers. Nothing else.

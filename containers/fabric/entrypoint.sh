@@ -16,12 +16,11 @@ for p in world mods config logs crash-reports; do
   ln -s "/data/$p" "/opt/fabric/$p"
 done
 
-# Seed the bundled mods (OPanel + its Fabric API dependency) once, then the volume
-# wins: a newer image must never replace a mod jar someone pinned or edited in /data.
-for f in /opt/bundled-mods/*.jar; do
-  b=$(basename "$f")
-  [ -e "/data/mods/$b" ] || cp -p "$f" "/data/mods/$b"
-done
+# Converge /data/mods onto the mods baked into the image: canonical names land, a mod
+# the volume already holds is never replaced, and one this image no longer bundles is
+# removed only if a previous fleet image put it there.
+. /opt/lib/plugin-seed.sh
+seed_plugins /opt/bundled-mods /data/mods fleet-mods
 
 # Files: symlink only. A dangling link is correct — the server reads ENOENT as
 # "absent" and creates the file on first write. Do NOT pre-create these: an empty

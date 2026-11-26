@@ -1,6 +1,6 @@
 name: containers
 
-# Builds the five server images on GitHub's runners and pushes them to ghcr.io.
+# Builds the four server images on GitHub's runners and pushes them to ghcr.io.
 # The uCore VMs never need a build toolchain or a source checkout — they pull
 # ghcr.io/<owner>/<repo>/<image>:<version> and nothing else.
 #
@@ -62,19 +62,28 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # images.json stores args as an object; docker/build-push-action wants KEY=VALUE lines.
+      # PLUGIN_TRIPLETS is the same file's plugin list flattened to
+      # `url install_as sha256` triples for the image's plugins build stage. Images with
+      # no plugins legitimately pass an empty value; the stage itself refuses an empty
+      # arg for images that declare plugins.
       - id: args
         env:
           ARGS: ${{ toJSON(matrix.image.args) }}
+          IMAGE: ${{ matrix.image.name }}
         run: |
           {
             echo 'args<<__ARGS__'
             echo "$ARGS" | jq -r 'to_entries[] | "\(.key)=\(.value)"'
+            echo "PLUGIN_TRIPLETS=$(jq -r --arg n "$IMAGE" '.[] | select(.name==$n) | .plugins[]? | "\(.url) \(.install_as) \(.sha256)"' containers/images.json | paste -sd' ' -)"
             echo '__ARGS__'
           } >> "$GITHUB_OUTPUT"
 
       - uses: docker/build-push-action@v6
         with:
-          context: containers/${{ matrix.image.name }}
+          # One context for all four: the plugin seed script lives in containers/lib,
+          # outside any single image directory.
+          context: containers
+          dockerfile: containers/${{ matrix.image.name }}/Dockerfile
           build-args: ${{ steps.args.outputs.args }}
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}

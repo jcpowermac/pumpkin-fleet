@@ -10,7 +10,7 @@ ADD --chmod=0644 --checksum=sha256:${VELOCITY_SHA256} \
     https://fill-data.papermc.io/v1/objects/${VELOCITY_SHA256}/velocity-${VELOCITY_VERSION}.jar \
     /opt/velocity.jar
 
-COPY entrypoint.sh /opt/entrypoint.sh
+COPY velocity/entrypoint.sh /opt/entrypoint.sh
 # UBI minimal ships no uid 1000, so it can be claimed directly, and no
 # /usr/sbin/nologin either — hence /bin/false.
 RUN chmod 0755 /opt/entrypoint.sh \

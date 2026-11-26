@@ -25,36 +25,41 @@ RUN mkdir -p /opt/fabric \
       -downloadMinecraft -dir /opt/fabric \
  && rm -f /tmp/fabric-installer.jar
 
+# The mods declared in containers/images.json (Fabric API, OPanel, LuckPerms),
+# fetched in a throwaway stage: Fabric's loader refuses to start when a mod it
+# expects is missing, so these are as much build input as the loader itself.
+# CI passes them as one flat list of `url install_as sha256` triples. OPanel is a
+# plain mod here and hard-depends on Fabric API — without it the loader refuses to
+# start with "Mod 'OPanel' requires any version of fabric-api".
+FROM docker.io/library/fedora:42 AS plugins
+ARG PLUGIN_TRIPLETS
+# An image carrying this stage declares plugins, so an empty arg means the manifest
+# and the build disagree — fail rather than ship a server with none of them.
+RUN set -eu; \
+    if [ -z "${PLUGIN_TRIPLETS:-}" ]; then \
+      echo "PLUGIN_TRIPLETS is empty but this image declares plugins" >&2; exit 1; \
+    fi; \
+    mkdir -p /opt/plugins; cd /opt/plugins; \
+    set -- ${PLUGIN_TRIPLETS}; \
+    while [ "$#" -ge 3 ]; do \
+      curl -fsSL "$1" -o "$2"; echo "$3  $2" | sha256sum -c; shift 3; \
+    done
+# shortcut: the arg is word-split, so no url or install_as may contain whitespace
+# (all four CDNs satisfy); upgrade to a TSV build arg if one ever needs it.
 
 FROM eclipse-temurin:25-jre-ubi10-minimal
 
 ARG FABRIC_MC
 ARG FABRIC_LOADER
-ARG FABRIC_API
-ARG OPANEL_VERSION
-ARG OPANEL_ASSET
 ENV FABRIC_MC=${FABRIC_MC} \
-    FABRIC_LOADER=${FABRIC_LOADER} \
-    FABRIC_API=${FABRIC_API} \
-    OPANEL_VERSION=${OPANEL_VERSION}
+    FABRIC_LOADER=${FABRIC_LOADER}
 
 COPY --from=install /opt/fabric /opt/fabric
-COPY entrypoint.sh /opt/entrypoint.sh
-
-# Bundled mods, seeded into the volume on first start so the image stays the pin.
-# mkdir first: ADD from a URL creates implicit parents as 0644, which uid 1000
-# cannot traverse.
-#
-# OPanel is a plain mod jar here, and it hard-depends
-# on Fabric API — without it the loader refuses to start with
-# "Mod 'OPanel' requires any version of fabric-api".
-RUN mkdir -p -m 0755 /opt/bundled-mods
-ADD --chmod=0644 \
-    https://github.com/opanel-mc/opanel/releases/download/${OPANEL_VERSION}/${OPANEL_ASSET} \
-    /opt/bundled-mods/opanel-fabric.jar
-ADD --chmod=0644 \
-    https://github.com/FabricMC/fabric/releases/download/${FABRIC_API}/fabric-api-${FABRIC_API}.jar \
-    /opt/bundled-mods/fabric-api.jar
+# /opt/plugins -> /opt/bundled-mods: the loader looks in mods/, and the entrypoint
+# seeds from there into /data/mods.
+COPY --from=plugins /opt/plugins /opt/bundled-mods
+COPY lib/plugin-seed.sh /opt/lib/plugin-seed.sh
+COPY fabric/entrypoint.sh /opt/entrypoint.sh
 
 # UBI minimal ships no uid 1000, so it can be claimed directly, and no
 # /usr/sbin/nologin either — hence /bin/false.
@@ -63,7 +68,7 @@ RUN chmod 0755 /opt/entrypoint.sh \
  && useradd -u 1000 -g 1000 -M -d /data -s /bin/false minecraft \
  && mkdir -p /data \
  && chown 1000:1000 /data \
- && chown -R 1000:1000 /opt/fabric
+ && chown -R 1000:1000 /opt/fabric /opt/bundled-mods /opt/lib
 
 USER 1000:1000
 WORKDIR /data
