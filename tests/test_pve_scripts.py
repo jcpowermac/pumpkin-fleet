@@ -81,6 +81,11 @@ elif command[:2] == ["zfs", "create"]:
         datasets.append(parent)
     datasets.append(name)
     save()
+elif command[:2] == ["qm", "status"]:
+    if command[2] not in vms:
+        sys.stderr.write(f"Configuration file 'nodes/{command[2]}.conf' does not exist\\n")
+        sys.exit(1)
+    print("status: running")
 elif command[:2] == ["qm", "config"]:
     if command[2] not in vms:
         sys.stderr.write(f"Configuration file 'nodes/{command[2]}.conf' does not exist\\n")
@@ -94,6 +99,16 @@ elif command[:2] == ["qm", "set"]:
         sys.exit(1)
     vms[vmid][key] = value
     save()
+elif command[:1] == ["mkdir"]:
+    pass                      # `ssh pve3 mkdir -p /var/coreos/snippets`
+elif command[:1] == ["pct"]:
+    print("ldap-bind-user ldap-bind-authtok")   # the sssd bind credential out of CT 150
+elif command[:1] == ["bash"]:
+    # `ssh pve3 bash -s <<EOF` — the per-node create/rebuild script. Recorded, not executed:
+    # what a test can see is whether the run got as far as the destroy at all.
+    body = sys.stdin.read()
+    with open(os.environ["PVE_CALLS"], "a") as log:
+        log.write("<<<heredoc\\n" + body + ">>>heredoc\\n")
 else:
     sys.stderr.write(f"unsupported on this simulated host: {' '.join(command)}\\n")
     sys.exit(1)
@@ -107,6 +122,8 @@ class Pve:
         self.state = root / "pve-state.json"
         self.calls = root / "pve-calls.log"
         _stub(self.bin, "ssh", PVE_STUB)
+        # The rebuild pushes one Ignition per node; a real scp here would reach 172.31.12.99.
+        _stub(self.bin, "scp", '#!/usr/bin/env bash\necho "scp $*" >> "$PVE_CALLS"\n')
         self.write_state(
             {
                 "datasets": [],
@@ -689,6 +706,51 @@ def test_create_nodes_names_the_missing_sssd_credential(tmp_path):
     assert result.returncode != 0
     assert "authentik LXC 150 unreadable — sssd bind credential unavailable" in result.stderr
     assert result.stdout == "", "nothing may be created or pushed before the credential is read"
+
+
+def create_nodes(pve: Pve, root: Path) -> subprocess.CompletedProcess:
+    """Run 20-create-nodes.sh against the simulated host, with a public key and no private."""
+    home = root / "home"
+    (home / ".ssh").mkdir(parents=True)
+    (home / ".ssh" / "id_ed25519.pub").write_text("ssh-ed25519 AAAAnotaprivatekey fleet@test\n")
+    return subprocess.run(
+        ["bash", str(REPO / "scripts" / "fleet" / "20-create-nodes.sh")],
+        capture_output=True,
+        text=True,
+        env=pve.env() | {"HOME": str(home)},
+    )
+
+
+def test_create_nodes_refuses_the_run_before_any_vm_when_a_world_is_still_on_scsi0(pve, tmp_path):
+    """The order was a comment, and a per-node check would destroy 201 and only then find
+    that 203's world never left its OS disk. So every node is decided first, read-only, and
+    one unmigrated node stops the run with nothing stopped or destroyed."""
+    result = create_nodes(pve, tmp_path)
+    assert result.returncode != 0, result.stdout
+    err = result.stderr
+    assert "REFUSE" in err, err
+    for vmid, node in NODES:
+        assert f"{vmid} ({node})" in err, err
+    # It names the order that has to be walked instead, and touches nothing.
+    for step in ("15-ensure-data-disks.sh", "tasks/gameserver.py", "25-migrate-data.sh <node>"):
+        assert step in err, err
+    log = pve.call_log()
+    assert "qm destroy" not in log and "qm stop" not in log and "qm create" not in log, log
+    assert "heredoc" not in log, "a node was reached before every node had been decided"
+    assert "scp " not in log, "an Ignition was pushed for a run that cannot be safe"
+
+
+def test_create_nodes_destroys_once_every_node_is_on_its_host_zvol(pve, tmp_path):
+    state = pve.read_state()
+    for vmid, node in NODES:
+        state["vms"][vmid]["scsi1"] = f"/dev/zvol/pool/mcdata/{node}"
+    pve.write_state(state)
+
+    result = create_nodes(pve, tmp_path)
+    assert result.returncode == 0, result.stderr
+    log = pve.call_log()
+    # `$VMID` unexpanded: the destroy is in the script pve3 is handed, one node at a time.
+    assert log.count("qm destroy $VMID --purge") == len(NODES), log
 
 
 def test_create_nodes_owns_the_snippets_dir_and_attaches_data_disks():

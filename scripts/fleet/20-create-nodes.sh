@@ -18,7 +18,9 @@
 # ORDER MATTERS, and this script is the last step, not the first: the destroy below takes
 # the whole VM including its scsi0, and a world that has not been moved to the host-owned
 # zvol yet goes with it. On node 201 that is the situation today (`scsi0` is
-# pool:vm-201-disk-0 and the world is on it). Run, in this order:
+# pool:vm-201-disk-0 and the world is on it). The order is now ENFORCED, not advised: the
+# read-only pre-flight before the loop refuses the whole run if any node's scsi1 is not its
+# host-owned zvol. Run, in this order:
 #
 #   1. scripts/fleet/15-ensure-data-disks.sh       create pool/mcdata/<node> and attach
 #                                                  scsi1 to the node that is STILL RUNNING
@@ -30,7 +32,8 @@
 #   5. THIS SCRIPT                                 only now may a VM be destroyed
 #
 # Steps 1-2 and 4 are idempotent, so repeat them freely; step 3 refuses when the old tree is
-# empty or the zvol already holds data; step 5 is the only irreversible one.
+# empty, the zvol already holds data, or the node's container is still running; step 5 is the
+# only irreversible one.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
@@ -79,6 +82,37 @@ done
 [[ -n "${canary_matched:-}" ]] \
   || { echo "CANARY_NODE=$CANARY_NODE matches no node in this list (lobby plugins vanilla neoforge)" >&2; exit 1; }
 
+# The decision pass: is every world already on its host-owned zvol? Read-only (`qm status`,
+# `qm config`) and every node decided before any VM is touched — a check inside the loop
+# would destroy 201 and only then discover that 203's world never left its OS disk.
+# A node with no VM has nothing to lose; a node whose scsi1 is not /dev/zvol/pool/mcdata/<node>
+# still has its world on the disposable scsi0, and destroying it is how a world is lost.
+if ((!RENDER_ONLY)); then
+  unsafe=()
+  for entry in "${NODES[@]}"; do
+    IFS=: read -r vmid name ip <<<"$entry"
+    ssh "$PVE_HOST" qm status "$vmid" >/dev/null 2>&1 || continue
+    config="$(ssh "$PVE_HOST" qm config "$vmid")" \
+      || { echo "REFUSE: cannot read VM $vmid (${name}) — not destroying what I cannot inspect" >&2; exit 1; }
+    scsi1="$(sed -n 's/^scsi1: //p' <<<"$config")"
+    # `qm config` prints the volume as it was attached plus its options: <backing>,size=...
+    backing="${scsi1%%,*}"
+    [[ "$backing" == "/dev/zvol/pool/mcdata/${name}" ]] || unsafe+=("${vmid} (${name})")
+  done
+  if ((${#unsafe[@]})); then
+    echo "REFUSE: these VMs have no host-owned data disk attached as scsi1, so destroying" >&2
+    echo "        them takes the world on their OS disk (scsi0) with it:" >&2
+    for entry in ${unsafe[@]+"${unsafe[@]}"}; do echo "          VM $entry" >&2; done
+    echo "        Move each world onto its zvol first, one node at a time, in this order:" >&2
+    echo "          1. scripts/fleet/15-ensure-data-disks.sh" >&2
+    echo "          2. uv run pyinfra inventory/hosts.py --limit <node> tasks/gameserver.py  # writes the .mount unit, then refuses" >&2
+    echo "          3. scripts/fleet/25-migrate-data.sh <node>                              # on the node, server stopped" >&2
+    echo "          4. uv run pyinfra inventory/hosts.py --limit <node> tasks/gameserver.py  # mounts it, starts the container" >&2
+    echo "        Nothing was stopped, detached or destroyed." >&2
+    exit 1
+  fi
+fi
+
 mkdir -p build/nodes
 # The snippet dir is spike-era state no tracked step created: on a fresh host every
 # `cicustom` below would point at a file that is not there. After the CANARY_NODE check,
@@ -111,7 +145,8 @@ if qm status \$VMID >/dev/null 2>&1; then
   qm stop \$VMID 2>/dev/null || true
   # --purge takes what PVE created (scsi0 in pool). The world is scsi1, a zvol the host
   # owns (pool/mcdata/${name}), so it survives qm destroy --purge and 15-ensure-data-disks.sh
-  # reattaches it below — verified on pve3 with a throwaway VMID
+  # reattaches it — on the next full run if this one aborts mid-loop — verified on pve3 with
+  # a throwaway VMID
   # (docs/superpowers/specs/2026-11-26-fleet-plugin-gitops-design.md §2b).
   qm destroy \$VMID --purge
 fi
@@ -133,8 +168,9 @@ done
 if ((RENDER_ONLY)); then
   echo "OK: ${#NODES[@]} nodes rendered to build/nodes/ (no pve3 contact, no sssd bind credential)"
 else
-  # After every VM exists: scsi1 is attached on every create, and a world already on
-  # pool/mcdata/<node> comes back with the newly imported OS disk.
+  # After every VM exists: a world already on pool/mcdata/<node> comes back with the newly
+  # imported OS disk. On a mid-loop abort this never runs, so a rebuilt node has no scsi1
+  # until the next full run (the pre-flight above refuses until then).
   bash "$ROOT/scripts/fleet/15-ensure-data-disks.sh"
   echo "OK: ${#NODES[@]} nodes created; each rebases on first boot (~5-10 min)"
 fi
