@@ -24,7 +24,7 @@ on:
   workflow_dispatch:
     inputs:
       digest:
-        description: sha256 digest of pumpkin-os:latest (the canary build to promote to :stable)
+        description: sha256 digest of a published pumpkin-os build (latest's to advance, an older dated build to roll back)
         required: false
         type: string
 
@@ -67,9 +67,10 @@ jobs:
   # The OS channel. BlueBuild's daily build moves :latest (plus dated build tags), and pins.env
   # puts the canary node on :latest (OS_TAG_CANARY) while every other node runs :stable
   # (OS_TAG). :stable therefore moves only by this dispatch, through scripts/promote.sh — the
-  # same guard and the same registry-side retag the server images use, with EXPECTED_TAG
-  # narrowed to the canary tag so a stale dated build, or :stable's own digest, cannot be
-  # reported as a promotion.
+  # same guard and the same registry-side retag the server images use. The accepted digest is
+  # any published tag's (Ruling 6a), dated builds included, so re-pointing :stable at the
+  # previous build is a rollback and anything ghcr never published is refused. TARGET_TAG is
+  # OS_TAG: the tag this moves has to be the tag the nodes follow.
   promote-os:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.digest != ''
     runs-on: ubuntu-latest
@@ -86,11 +87,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Promote pumpkin-os:stable to the canary digest
+      - name: Promote the OS channel tag to a published digest
         env:
           DIGEST: ${{ github.event.inputs.digest }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -a; source configs/pins.env; set +a
-          PREFIX="${OS_IMAGE%/*}" IMAGE="${OS_IMAGE##*/}" EXPECTED_TAG="$OS_TAG_CANARY" \
+          PREFIX="${OS_IMAGE%/*}" IMAGE="${OS_IMAGE##*/}" TARGET_TAG="$OS_TAG" \
             bash scripts/promote.sh

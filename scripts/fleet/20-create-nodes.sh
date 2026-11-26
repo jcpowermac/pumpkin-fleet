@@ -48,6 +48,16 @@ NODES=(
   "${VMID_NEOFORGE}:neoforge:${IP_NEOFORGE}"
 )
 
+# CANARY_NODE is a name matched against this list: a typo or a rename would otherwise leave the
+# canary branch below unreached and all four nodes on the promoted channel, green. Checked before
+# the loop so it fails before any node is destroyed/recreated.
+for entry in "${NODES[@]}"; do
+  IFS=: read -r _ name _ <<<"$entry"
+  [[ "$name" != "$CANARY_NODE" ]] || canary_matched=1
+done
+[[ -n "${canary_matched:-}" ]] \
+  || { echo "CANARY_NODE=$CANARY_NODE matches no node in this list (lobby plugins vanilla neoforge)" >&2; exit 1; }
+
 mkdir -p build/nodes
 for entry in "${NODES[@]}"; do
   IFS=: read -r vmid name ip <<<"$entry"

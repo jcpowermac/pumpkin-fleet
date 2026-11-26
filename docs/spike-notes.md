@@ -349,11 +349,11 @@ ostree-unverified-registry:ghcr.io/jcpowermac/pumpkin-os@sha256:<digest>
 ### HAZARD: `fleet-provision` will revert a pumpkin-os node
 
 `templates/fleet.ign.butane`'s guard is
-`rpm-ostree status --booted | grep -q 'ublue-os/ucore'`. A node booted on
-`ghcr.io/jcpowermac/pumpkin-os` does **not** match, so the unit would rebase it back to
-uCore and reboot — a loop. Nodes must have `fleet-provision` disabled before rebasing
-(done on 201), and the guard needs widening to `ublue-os/ucore|pumpkin-os` before new
-nodes are created against this image.
+`rpm-ostree status --booted | grep -q "${UCORE_IMAGE}"`. It used to hardcode `ublue-os/ucore`,
+and this is why it no longer does: a node booted on `ghcr.io/jcpowermac/pumpkin-os` did **not**
+match the old name, so the unit would rebase it back to uCore and reboot — a loop. Matching on the
+image the node is being rendered to rebase onto is right for the spike base and for the fleet
+image. Nodes rebased by hand still need `fleet-provision` disabled first (done on 201).
 
 ---
 

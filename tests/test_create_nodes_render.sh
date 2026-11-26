@@ -46,6 +46,10 @@ out=$(HOME="$home" PATH="$bin:$PATH" bash "$CREATE" --render-only 2>&1); code=$?
 # The channel split, per node: three follow the promoted tag, the canary node the canary tag.
 lines=$(grep -h "rpm-ostree rebase" "$REPO"/build/nodes/*.butane)
 [ "$(wc -l <<<"$lines")" -eq 4 ] || fail "expected four rebase lines, got: $lines"
+for n in lobby plugins vanilla neoforge; do
+  # The .ign is what pve3 is handed; a render that produced no ignition is not a render.
+  [ -s "$REPO/build/nodes/$n.ign" ] || fail "$n produced no ignition (build/nodes/$n.ign is empty)"
+done
 for n in lobby vanilla neoforge; do
   grep -q 'ostree-unverified-registry:ghcr.io/jcpowermac/pumpkin-os:stable' \
     "$REPO/build/nodes/$n.butane" || fail "$n is not on the stable OS channel: $lines"
@@ -64,5 +68,17 @@ done
 # sssd bind fields are empty because reading them is a pve3 call.
 grep -q 'ldap_default_bind_dn = cn=,ou=users' "$REPO/build/nodes/lobby.butane" \
   || fail "--render-only leaked a bind credential into the render"
+
+# A typo in CANARY_NODE must not be a green run that quietly leaves every node on the promoted
+# channel with nothing following the canary build. Run the same script against a pins copy whose
+# CANARY_NODE matches no node name (separate tree: the script sources configs/pins.env by path).
+alt=$work/alt; mkdir -p "$alt/scripts/fleet" "$alt/configs" "$alt/templates"
+cp "$CREATE" "$alt/scripts/fleet/20-create-nodes.sh"
+cp "$REPO/templates/fleet.ign.butane" "$alt/templates/"
+sed 's/^CANARY_NODE=plugins$/CANARY_NODE=plugns/' "$REPO/configs/pins.env" > "$alt/configs/pins.env"
+out2=$(HOME="$home" PATH="$bin:$PATH" bash "$alt/scripts/fleet/20-create-nodes.sh" --render-only 2>&1); code2=$?
+[ "$code2" -ne 0 ] || fail "CANARY_NODE=plugns left all four nodes on the promoted channel with exit 0"
+case "$out2" in *plugns*) ;; (*) fail "the CANARY_NODE failure did not name the value: $out2" ;; esac
+[ -s "$work/calls.log" ] && fail "the typo run contacted pve3: $(cat "$work/calls.log")"
 
 echo "OK: --render-only renders all four nodes offline, on the right channel, contacting nothing"

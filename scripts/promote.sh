@@ -1,38 +1,38 @@
 #!/usr/bin/env bash
-# Move <image>:stable to a digest CI published for that image — registry-side, no pull.
+# Move <image>:<channel tag> to a digest CI published for that image — registry-side, no pull.
 
-# Ruling 4a: the accepted digests are the ones ghcr.io already serves for this image, i.e.
-# the Docker-Content-Digest of one of its published tags (its version tags plus stable and
-# stable-next). Accepting an *older* version tag's digest is the rollback path the design's
-# rejection needs (spec §1: revert the PR, repoint stable at the previous digest). A digest
-# matching none of them is refused — that is the whole guard, and it is what keeps stable
-# pointing only at something the build job published.
+# Rulings 4a + 6a: the accepted digests are the ones ghcr.io already serves for this image, i.e.
+# the Docker-Content-Digest of one of its published tags — version tags for the server images,
+# BlueBuild's dated builds for pumpkin-os, plus stable and stable-next. Accepting an *older*
+# published tag's digest is the rollback path both channels need (spec §1: revert the change,
+# repoint the channel at the previous digest). A digest matching none of them is refused — that
+# is the whole guard, and it is what keeps a channel pointing only at something published.
 #
 # Retagging by manifest copy (docker buildx imagetools create) rather than docker
 # pull/tag/push: the daemon would re-push the single-platform manifest for the OCI index
-# ghcr stored, so stable would land on a different digest than the one just verified.
+# ghcr stored, so the channel tag would land on a different digest than the one just verified.
 #
 # env: PREFIX  ghcr.io/<owner>[/<repo>], as the workflow's prefix step lowercases it
-#      IMAGE   images.json image name
+#      IMAGE   images.json image name, or the OS image name (pumpkin-os)
 #      DIGEST  sha256:<64 hex> or bare 64 hex
 #      GITHUB_TOKEN  optional: ghcr serves a public package anonymously
-#      EXPECTED_TAG  optional: accept only this tag's digest. The OS promote is "whatever
-#                    pumpkin-os:latest carries, or nothing": BlueBuild publishes dated build
-#                    tags beside latest (20261126, 20261126-45, …), so the any-published-tag
-#                    rule would also accept a stale dated build — or :stable's own digest,
-#                    which is a no-op reported as a promotion.
-#                    Ruling 4a's rollback-by-older-version-tag stays available to the server
-#                    images, which call this script without EXPECTED_TAG.
+#      TARGET_TAG  optional: the channel tag to move, default stable. The nodes follow the tag
+#                  pins.env names, so the retag has to follow it too: a hardcoded `:stable`
+#                  would leave a node on a renamed channel tag that nothing ever moves.
 set -euo pipefail
 
 image="${IMAGE:-}"
 digest="${DIGEST:-}"
 prefix="${PREFIX:-}"
-expected_tag="${EXPECTED_TAG:-}"
+target_tag="${TARGET_TAG:-stable}"
 digest="${digest#sha256:}"
 
 if ! [[ "$image" =~ ^[a-z0-9-]+$ ]]; then
   echo "IMAGE must be an images.json image name, got '$image'" >&2
+  exit 1
+fi
+if ! [[ "$target_tag" =~ ^[a-z0-9-]+$ ]]; then
+  echo "TARGET_TAG must be a channel tag, got '$target_tag'" >&2
   exit 1
 fi
 if [[ ! "$digest" =~ ^[0-9a-f]{64}$ || -z "$prefix" ]]; then
@@ -60,7 +60,6 @@ tags=$(curl -fsS -H "Authorization: Bearer $token" "$api/tags/list" | jq -r '.ta
 
 matched=""
 for tag in $tags; do
-  [[ -z "$expected_tag" || "$tag" == "$expected_tag" ]] || continue
   headers=$(curl -fsSI -H "Authorization: Bearer $token" -H "Accept: $accept" "$api/manifests/$tag" | tr -d '\r') \
     || { echo "could not read the digest of $repo/$image:$tag" >&2; continue; }
   if [[ "$(grep -im1 '^docker-content-digest:' <<<"$headers" | cut -d' ' -f2)" == "sha256:$digest" ]]; then
@@ -70,14 +69,10 @@ for tag in $tags; do
 done
 
 if [[ -z "$matched" ]]; then
-  if [[ -n "$expected_tag" ]]; then
-    echo "refusing: sha256:$digest is not the digest of $repo/$image:$expected_tag — stable only moves to what the canary channel runs" >&2
-  else
-    echo "refusing: sha256:$digest matches no published tag of $repo/$image — stable only moves to a digest CI built" >&2
-  fi
+  echo "refusing: sha256:$digest matches no published tag of $repo/$image — moving $target_tag needs a digest CI built" >&2
   exit 1
 fi
-echo "sha256:$digest is published as $repo/$image:$matched; moving $repo/$image:stable to it"
+echo "sha256:$digest is published as $repo/$image:$matched; moving $repo/$image:$target_tag to it"
 
 # Needs the docker login the workflow job already did (packages: write).
-docker buildx imagetools create --tag "$prefix/$image:stable" "$prefix/$image@sha256:$digest"
+docker buildx imagetools create --tag "$prefix/$image:$target_tag" "$prefix/$image@sha256:$digest"
