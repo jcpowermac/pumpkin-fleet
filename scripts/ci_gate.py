@@ -15,6 +15,12 @@ force= is the workflow_dispatch escape hatch (Ruling 4b): one image named by a h
 built regardless of the diff, which is how an image whose entry never changes gets a
 channel and how a Dockerfile-only fix gets a build.
 
+Rollback is promote-only. Merging a revert back to a `-pN` that was already published would
+put the image in the matrix and re-push that tag with a new digest — mutating the very tag a
+promote moved `stable` to. So a same-series revision that does not move forward is a GateError:
+the way back is `scripts/promote.sh` with the older published digest, and a revert you want to
+merge forward lands as a new `-pN`.
+
   ci_gate.py --base <path> --head <path> [--matrix] [--force-image <name>]
   exit 1 on any GateError; --matrix prints the JSON array of images to build (one line,
   for the Actions matrix)
@@ -32,7 +38,9 @@ from pathlib import Path
 from resolve_plugins import bump_revision
 
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
-REVISION = re.compile(r"-p\d+$")
+# `<server part>-pN`: the plugin revision the whole tag-immutability story turns on.
+REVISION = re.compile(r"^(?P<series>.*)-p(?P<n>\d+)$")
+JAR_NAME = re.compile(r"^[^\s/]+$")  # one token, no '/' — it travels inside PLUGIN_TRIPLETS
 
 
 @dataclass
@@ -82,8 +90,16 @@ def gate(base: list[dict], head: list[dict]) -> list[GateError]:
                     f"plugin {plugin.get('name')} has no url: PLUGIN_TRIPLETS cannot be "
                     "derived from it, so CI cannot ship it",
                 ))
+            install_as = plugin.get("install_as") or ""
+            if not JAR_NAME.match(install_as):
+                errors.append(GateError(
+                    name,
+                    f"plugin {plugin.get('name')} has install_as {install_as!r}: it is the jar "
+                    "name inside the `url install_as sha256` triplet the build writes, so it "
+                    "must be one non-empty token with no whitespace and no '/'",
+                ))
 
-        if plugins and not REVISION.search(version):
+        if plugins and not REVISION.match(version):
             errors.append(GateError(
                 name,
                 f"{name}:{version} ships {len(plugins)} plugin(s) with no -pN revision in "
@@ -91,13 +107,27 @@ def gate(base: list[dict], head: list[dict]) -> list[GateError]:
             ))
 
         previous = built.get(name)
-        if previous is not None and build_identity(previous) != build_identity(image):
-            if previous.get("version") == version:
-                errors.append(GateError(
-                    name,
-                    f"{name}:{version} changes args or plugins with an unchanged version, "
-                    f"and that tag is already published — it has to become {bump_revision(version)}",
-                ))
+        if previous is None:
+            continue
+        previous_version = previous.get("version") or ""
+        if build_identity(previous) != build_identity(image) and previous_version == version:
+            errors.append(GateError(
+                name,
+                f"{name}:{version} changes args or plugins with an unchanged version, "
+                f"and that tag is already published — it has to become {bump_revision(version)}",
+            ))
+
+        # Same server series, revision not moving forward: that revision is already published.
+        head_rev, base_rev = REVISION.match(version), REVISION.match(previous_version)
+        if (head_rev and base_rev and head_rev["series"] == base_rev["series"]
+                and version != previous_version and int(head_rev["n"]) < int(base_rev["n"])):
+            errors.append(GateError(
+                name,
+                f"{name}:{version} reverts to an already-published revision of "
+                f"{name}:{previous_version}. Rollback is promote-only — run scripts/promote.sh "
+                f"with the older digest; to merge the reverted content, re-land it as "
+                f"{bump_revision(previous_version)}",
+            ))
     return errors
 
 

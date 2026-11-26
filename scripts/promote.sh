@@ -38,15 +38,22 @@ accept="application/vnd.oci.image.index.v1+json, application/vnd.docker.distribu
 auth=()
 [[ -n "${GITHUB_TOKEN:-}" ]] && auth=(-H "Authorization: Bearer $GITHUB_TOKEN")
 
-token=$(curl -fsS ${auth[@]+"${auth[@]}"} "https://ghcr.io/token?service=ghcr.io&scope=repository:$repo/$image:pull" | jq -r .token)
+# `|| { … }` on each call: under set -e a bare `curl: (22)` is the only thing the job log
+# would show, and that is not actionable.
+token=$(curl -fsS ${auth[@]+"${auth[@]}"} "https://ghcr.io/token?service=ghcr.io&scope=repository:$repo/$image:pull" | jq -r .token) \
+  || { echo "ghcr token exchange failed for $repo/$image" >&2; exit 1; }
 if [[ -z "$token" || "$token" == "null" ]]; then
-  echo "could not get a pull token for $repo/$image" >&2
+  echo "ghcr returned no pull token for $repo/$image" >&2
   exit 1
 fi
 
+tags=$(curl -fsS -H "Authorization: Bearer $token" "$api/tags/list" | jq -r '.tags[]?') \
+  || { echo "could not list the published tags of $repo/$image" >&2; exit 1; }
+
 matched=""
-for tag in $(curl -fsS -H "Authorization: Bearer $token" "$api/tags/list" | jq -r '.tags[]?'); do
-  headers=$(curl -fsSI -H "Authorization: Bearer $token" -H "Accept: $accept" "$api/manifests/$tag" | tr -d '\r') || continue
+for tag in $tags; do
+  headers=$(curl -fsSI -H "Authorization: Bearer $token" -H "Accept: $accept" "$api/manifests/$tag" | tr -d '\r') \
+    || { echo "could not read the digest of $repo/$image:$tag" >&2; continue; }
   if [[ "$(grep -im1 '^docker-content-digest:' <<<"$headers" | cut -d' ' -f2)" == "sha256:$digest" ]]; then
     matched="$tag"
     break

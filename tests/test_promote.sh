@@ -41,8 +41,19 @@ digest_of() {
   esac
 }
 case "$url" in
-  */token*) echo '{"token":"faketoken"}' ;;
-  */tags/list) echo '{"name":"jcpowermac/pumpkin-fleet/papermc","tags":["26.3-258-p1","broken-tag","26.3-258-p2","stable","stable-next"]}' ;;
+  */token*)
+    if [ "${STUB_MODE:-ok}" = token-fail ]; then
+      # what real `curl -fsS` prints on a 401, so the diagnostic path is exercised honestly
+      echo 'curl: (22) The requested URL returned error: 401' >&2
+      exit 22
+    fi
+    echo '{"token":"faketoken"}' ;;
+  */tags/list)
+    if [ "${STUB_MODE:-ok}" = tags-fail ]; then
+      echo 'curl: (22) The requested URL returned error: 500' >&2
+      exit 22
+    fi
+    echo '{"name":"jcpowermac/pumpkin-fleet/papermc","tags":["26.3-258-p1","broken-tag","26.3-258-p2","stable","stable-next"]}' ;;
   */manifests/*)
     tag=${url##*/manifests/}
     sha=$(digest_of "$tag")
@@ -60,9 +71,9 @@ echo "docker $*" >> "$DOCKER_LOG"
 EOF
 chmod +x "$bin/curl" "$bin/docker"
 
-run() { # run <image> <digest> ; echoes the promote output, sets $code
+run() { # run <image> <digest> [stub-mode] ; echoes the promote output, sets $code
   : > "$work/docker.log"
-  out=$(PATH="$bin:$PATH" DOCKER_LOG="$work/docker.log" \
+  out=$(PATH="$bin:$PATH" DOCKER_LOG="$work/docker.log" STUB_MODE="${3:-ok}" \
         PREFIX=ghcr.io/jcpowermac/pumpkin-fleet IMAGE="$1" DIGEST="$2" GITHUB_TOKEN=fake \
         bash "$PROMOTE" 2>&1)
   code=$?
@@ -100,5 +111,24 @@ run papermc "sha256:deadbeef"
 [ "$code" -ne 0 ] || fail "a malformed digest was accepted"
 run papermc ""
 [ "$code" -ne 0 ] || fail "an empty digest was accepted"
+
+# A failed token exchange has to say so: the pipeline must not red with a bare curl error.
+run papermc "$A" token-fail
+[ "$code" -ne 0 ] || fail "a failed token exchange was reported as success"
+case "$out" in *"token exchange failed for jcpowermac/pumpkin-fleet/papermc"*) ;;
+  (*) fail "token failure was not named: $out" ;;
+esac
+case "$out" in *"curl:"*) ;; (*) fail "no curl diagnostics survived: $out" ;;
+esac
+[ -s "$work/docker.log" ] && fail "a failed token exchange still reached the retag: $log"
+
+# Same for a tags/list failure: "matches no published tag" must not be what a transport
+# failure gets reported as.
+run papermc "$A" tags-fail
+[ "$code" -ne 0 ] || fail "a tags/list failure was reported as success"
+case "$out" in *"could not list the published tags of jcpowermac/pumpkin-fleet/papermc"*) ;;
+  (*) fail "tags/list failure was not named: $out" ;;
+esac
+[ -s "$work/docker.log" ] && fail "a failed tags/list still reached the retag: $log"
 
 echo "OK: promote accepts any published digest (including a rollback) and refuses the rest"

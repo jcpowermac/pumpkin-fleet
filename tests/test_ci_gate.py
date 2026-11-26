@@ -158,6 +158,41 @@ def test_annotation_only_edits_never_rebuild_a_published_tag():
     assert ci_gate.gate([_image()], [_image(plugins=annotated)]) == []
 
 
+def test_a_reverted_plugin_revision_is_rejected():
+    # The design's rollback is promote-only. Merging a revert back to -p1 would put the
+    # image in the matrix and re-push papermc:26.3-258-p1 with a digest that is not the one
+    # the rollback pointed stable at — the tag the fleet was moved to would mutate.
+    errors = _errors([_image(version="26.3-258-p2")], [_image(version="26.3-258-p1")])
+    assert [e.image for e in errors] == ["papermc"]
+    assert "promote" in errors[0].message and "-p" in errors[0].message
+
+
+def test_a_same_series_no_op_is_not_a_reverted_revision():
+    # An unchanged manifest (a re-run, an annotation-only edit) must stay clean: it builds nothing.
+    assert _errors([_image(version="26.3-258-p2")], [_image(version="26.3-258-p2")]) == []
+
+
+def test_a_lower_revision_in_a_new_server_series_is_allowed():
+    # 26.3-258-p2 -> 26.4-300-p1 is a server upgrade, not a rollback.
+    base = [_image(version="26.3-258-p2")]
+    head = [_image(
+        version="26.4-300-p1",
+        args={"PAPER_VERSION": "26.4-300", "PAPER_SHA256": "c5df5fb9f6155e48380c67c6e2b2dc25"},
+    )]
+    assert _errors(base, head) == []
+
+
+def test_install_as_is_validated():
+    # containers.yml writes `url install_as sha256` triples: a missing or space-bearing
+    # install_as means an empty jar name or a ragged triplet list.
+    missing = _errors([_image()], [_image(plugins=_plugin(install_as=None))])
+    spaced = _errors([_image()], [_image(plugins=_plugin(install_as="Luck Perms.jar"))])
+    pathed = _errors([_image()], [_image(plugins=_plugin(install_as="plugins/LuckPerms.jar"))])
+    assert any("install_as" in e.message for e in missing)
+    assert any("install_as" in e.message for e in spaced)
+    assert any("install_as" in e.message for e in pathed)
+
+
 def test_a_forced_dispatch_image_is_built_even_when_unchanged():
     # Ruling 4b: a forced dispatch is how a channel gets seeded for an image whose entry
     # never changes (velocity, neoforge) and how a Dockerfile-only fix gets built.

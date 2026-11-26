@@ -22,8 +22,9 @@ name: containers
 #     This is what seeds a channel for an image whose entry never changes (velocity,
 #     neoforge) and what rebuilds after a Dockerfile-only fix. It does re-publish that
 #     image's version tag with a new digest: that is the point, and it is a human decision.
-#   * image + digest -> promote. The digest must match one of the image's published tags,
-#     so naming an older version tag's digest is the rollback that a reverted PR needs.
+#   * image + digest -> promote. The digest must match one of the image's published tags, so
+#     naming an older version tag's digest is the rollback the design needs — and rollback is
+#     promote-only: a merged revert would re-publish that revision, so ci_gate rejects it.
 
 on:
   push:
@@ -141,7 +142,8 @@ jobs:
   # stable is the tag every node pulls, and it moves only here. The dispatcher names a digest;
   # scripts/promote.sh accepts it only if it is the digest ghcr.io already serves for a tag CI
   # published of that image — stable-next for a forward promote, an older version tag for the
-  # rollback a reverted PR needs (spec §1). A digest matching none of them aborts the job.
+  # rollback a rejected canary needs (spec §1). Rollback is promote-only; the gate is what stops
+  # a merged revert from re-publishing that revision. A digest matching none of them aborts.
   promote:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.digest != ''
     needs: matrix

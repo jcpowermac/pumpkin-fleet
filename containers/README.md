@@ -123,9 +123,14 @@ Notes:
    never rebuilt under its own published tag.
 3. Merge. CI builds `<image>:<version>` and `<image>:stable-next`; the canary node follows
    `stable-next`, then a `workflow_dispatch` naming that digest moves `<image>:stable`, and
-   the rest of the fleet converges on its podman timer. Rolling back is the same dispatch
-   with an older version tag's digest.
-4. `workflow_dispatch` with only an `image` forces that image into the matrix even when its
+   the rest of the fleet converges on its podman timer.
+4. **Rollback is promote-only.** Dispatch again with the older version tag's digest and
+   `stable` moves to bytes CI actually published. Never roll back by merging a revert of
+   `images.json`: the gate rejects a plugin revision that goes backwards within the same
+   server series, because the merge would rebuild `26.3-258-p1` and re-push that tag with a
+   new digest — mutating the tag the rollback pointed `stable` at. Reverted content you
+   want shipped lands as a new `-pN`.
+5. `workflow_dispatch` with only an `image` forces that image into the matrix even when its
    entry did not change — how a channel gets seeded for an image whose entry never changes,
    and how a Dockerfile-only fix gets built. It re-publishes that image's version tag with a
    new digest, so it is a deliberate lever rather than the everyday path.
