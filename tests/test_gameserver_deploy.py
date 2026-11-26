@@ -178,6 +178,14 @@ def test_a_world_still_on_the_os_disk_stops_the_deploy_before_the_mount():
     assert unit < guard < mount
 
 
+def test_a_partition_table_with_no_filesystem_is_refused_not_formatted():
+    """`blkid` reports PTTYPE but no TYPE for a partitioned device: in use, not blank."""
+    blkid = f"DEVNAME={DATA_DEV}\nPTTYPE=gpt\nPTUUID=1234\n"
+    with pytest.raises(SystemExit) as refused:
+        deploy_ops("plugins", blkid=blkid)
+    assert "partition-table" in str(refused.value) and "not xfs" in str(refused.value)
+
+
 def test_the_deploy_fails_when_the_volume_is_not_mounted():
     checks = [c for c in commands(deploy_ops("plugins")) if "is not a mountpoint" in c]
     assert checks, commands(deploy_ops("plugins"))

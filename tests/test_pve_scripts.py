@@ -54,7 +54,7 @@ with open(os.environ["PVE_CALLS"], "a") as log:
     log.write(" ".join(argv) + "\\n")
 state = json.loads(open(os.environ["PVE_STATE"]).read())
 command = argv[1:]
-zvols, vms = state["zvols"], state["vms"]
+datasets, vms = state["datasets"], state["vms"]
 
 
 def save():
@@ -62,14 +62,24 @@ def save():
 
 
 if command[:2] == ["zfs", "list"]:
-    if command[-1] not in zvols:
+    if command[-1] not in datasets:
         sys.exit(1)
     print(command[-1])
-elif command[:3] == ["zfs", "create", "-V"]:
-    if command[-1] in zvols:
-        sys.stderr.write(f"cannot create '{command[-1]}': dataset already exists\\n")
+elif command[:2] == ["zfs", "create"]:
+    # `zfs create` does not create a missing parent unless it is told to (-p), and a fresh
+    # host has no pool/mcdata at all. Modelled here so a -p-less script fails in the test.
+    flags = [arg for arg in command[2:] if arg.startswith("-")]
+    name = [arg for arg in command[2:] if not arg.startswith("-")][-1]
+    parent = name.rsplit("/", 1)[0]
+    if name in datasets:
+        sys.stderr.write(f"cannot create '{name}': dataset already exists\\n")
         sys.exit(1)
-    zvols.append(command[-1])
+    if parent not in datasets and "-p" not in flags and parent != "pool":
+        sys.stderr.write(f"cannot create '{name}': parent '{parent}' does not exist\\n")
+        sys.exit(1)
+    if parent not in datasets:
+        datasets.append(parent)
+    datasets.append(name)
     save()
 elif command[:2] == ["qm", "config"]:
     if command[2] not in vms:
@@ -99,7 +109,7 @@ class Pve:
         _stub(self.bin, "ssh", PVE_STUB)
         self.write_state(
             {
-                "zvols": [],
+                "datasets": [],
                 "vms": {vmid: {"scsi0": f"pool:vm-{vmid}-disk-0"} for vmid, _ in NODES},
             }
         )
@@ -143,7 +153,9 @@ def test_data_disk_attach_is_a_host_zvol(pve):
     assert "--scsi1 /dev/zvol/pool/mcdata/lobby" in result.stdout
     assert "pool:vm-201-disk-1" not in result.stdout
     for node in ("lobby", "plugins", "vanilla", "neoforge"):
-        assert f"zfs create -V 40G pool/mcdata/{node}" in result.stdout
+        # -p: `zfs create` does not create a missing parent, and a fresh host has no
+        # pool/mcdata. Without it the first real run aborts under set -e.
+        assert f"zfs create -p -V 40G pool/mcdata/{node}" in result.stdout
 
 
 def test_dry_run_is_identical_twice_and_creates_nothing(pve):
@@ -151,7 +163,7 @@ def test_dry_run_is_identical_twice_and_creates_nothing(pve):
     second = ensure_data_disks(pve, "--dry-run")
     assert first.returncode == second.returncode == 0
     assert first.stdout == second.stdout
-    assert pve.read_state()["zvols"] == []
+    assert pve.read_state()["datasets"] == []
     assert not any("scsi1" in vm for vm in pve.read_state()["vms"].values())
     log = pve.call_log()
     assert "zfs create" not in log and "qm set" not in log, log
@@ -161,7 +173,8 @@ def test_a_real_run_twice_is_a_noop_the_second_time(pve):
     first = ensure_data_disks(pve)
     assert first.returncode == 0, first.stderr
     state = pve.read_state()
-    assert state["zvols"] == [f"pool/mcdata/{node}" for _, node in NODES]
+    # The parent is created once, by the first zvol, and never again.
+    assert state["datasets"] == ["pool/mcdata"] + [f"pool/mcdata/{node}" for _, node in NODES]
     assert state["vms"]["201"]["scsi1"] == "/dev/zvol/pool/mcdata/lobby"
     assert state["vms"]["204"]["scsi1"] == "/dev/zvol/pool/mcdata/neoforge"
 
@@ -176,11 +189,11 @@ def test_a_real_run_twice_is_a_noop_the_second_time(pve):
 def test_an_existing_zvol_with_a_world_on_it_is_left_alone(pve):
     """The rebuild case: the VM is gone, the world is not, and it is reattached as it was."""
     state = pve.read_state()
-    state["zvols"] = ["pool/mcdata/plugins"]
+    state["datasets"] = ["pool/mcdata", "pool/mcdata/plugins"]
     pve.write_state(state)
     result = ensure_data_disks(pve, "--dry-run")
     assert result.returncode == 0, result.stderr
-    assert "zfs create -V 40G pool/mcdata/plugins" not in result.stdout
+    assert "zfs create -p -V 40G pool/mcdata/plugins" not in result.stdout
     assert "--scsi1 /dev/zvol/pool/mcdata/plugins" in result.stdout
 
 
@@ -217,6 +230,10 @@ def test_blank_device_formats_and_used_device_does_not():
     # A filesystem that is not xfs is a world (or someone's disk): never a format candidate.
     assert mount.needs_format("DEVNAME=/dev/zd96\nTYPE=ext4\n") is False
     assert mount.filesystem_of("DEVNAME=/dev/zd96\nTYPE=ext4\n") == "ext4"
+    # A partition table with no filesystem on the device is in use too: `blkid` reports no
+    # TYPE, and mkfs.xfs's own refusal is version-dependent, not this fleet's contract.
+    assert mount.needs_format("DEVNAME=/dev/zd96\nPTTYPE=gpt\nPTUUID=1234\n") is False
+    assert mount.filesystem_of("DEVNAME=/dev/zd96\nPTTYPE=gpt\n") == "partition-table"
     assert mount.filesystem_of("") is None
 
 
@@ -225,6 +242,10 @@ def test_the_device_is_never_guessed():
     assert mount.data_device("lobby", listing, "/dev/pin") == BY_ID
     # No entry names the node: fall back to the pin, not to the first disk in the listing.
     assert mount.data_device("lobby", "scsi-0QEMU_QEMU_HARDDISK_drive-scsi1\n", "/dev/pin") == "/dev/pin"
+    # A by-id name that merely embeds the node name is not this node's disk: the match is
+    # anchored to a delimiter, so the pin wins instead.
+    assert mount.data_device("lobby", "scsi-0QEMU_QEMU_HARDDISK_blobby\n", "/dev/pin") == "/dev/pin"
+    assert mount.data_device("lobby", "scsi-0QEMU_QEMU_HARDDISK_lobby2\n", "/dev/pin") == "/dev/pin"
     with pytest.raises(ValueError) as refused:
         mount.data_device("lobby", "scsi-0QEMU_QEMU_HARDDISK_drive-scsi1\n", "")
     assert "FLEET_DATA_DEV" in str(refused.value)
@@ -277,6 +298,9 @@ elif tool == "mountpoint":
             print(f"{directory} is not a mountpoint")
         sys.exit(1)
 elif tool == "systemctl":
+    if os.environ.get("NODE_SYSTEMCTL_FAIL"):
+        print(f"Job for {args[-1]} failed", file=sys.stderr)
+        sys.exit(1)
     unit = args[-1]
     text = open(os.path.join(os.environ["FLEET_UNIT_DIR"], unit)).read()
     fields = dict(
@@ -310,6 +334,8 @@ class Node:
         self.stub = _stub(self.bin, "hoststub", NODE_STUB)
         for tool in ("mount", "umount", "mountpoint", "systemctl"):
             (self.bin / tool).symlink_to(self.stub)
+        self.tmp = self.srv / "lobby" / "data.tmp"
+        self.aside = self.srv / "lobby" / "data.pre-zvol"
         self.mounts = root / "node-mounts"
         self.calls = root / "node-calls.log"
         self.calls.write_text("")
@@ -337,12 +363,14 @@ def node(tmp_path):
     return Node(tmp_path)
 
 
-def migrate(node: Node, *args: str) -> subprocess.CompletedProcess:
+def migrate(
+    node: Node, *args: str, env: dict | None = None, name: str = "lobby"
+) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["bash", str(REPO / "scripts" / "fleet" / "25-migrate-data.sh"), *args, "lobby"],
+        ["bash", str(REPO / "scripts" / "fleet" / "25-migrate-data.sh"), *args, name],
         capture_output=True,
         text=True,
-        env=node.env(),
+        env=env or node.env(),
     )
 
 
@@ -352,7 +380,9 @@ def test_migration_dry_run_shows_the_commands_and_does_nothing(node):
     out = result.stdout
     assert f"mount {BY_ID}" in out
     assert f"cp -a {node.data}/. " in out
-    assert f"mv {node.data} {node.srv}/lobby/data.pre-zvol" in out
+    # Byte-for-byte, not an entry count: equal counts do not mean a faithful copy.
+    assert f"diff -r {node.data} {node.tmp}" in out
+    assert f"mv {node.data} {node.aside}" in out
     assert "systemctl start srv-lobby-data.mount" in out
     # The preview reads state (that is how it can refuse) and changes nothing.
     assert node.data.joinpath("world", "level.dat").exists()
@@ -365,12 +395,12 @@ def test_migration_dry_run_shows_the_commands_and_does_nothing(node):
 def test_migration_moves_the_old_tree_and_never_deletes_it(node):
     result = migrate(node)
     assert result.returncode == 0, result.stderr
-    # The copy landed in the (faked) mounted volume, verified by entry count before the move.
-    assert (node.srv / "lobby" / "data.tmp" / "world" / "level.dat").read_text() == "a world"
-    assert (node.srv / "lobby" / "data.tmp" / "server.properties").exists()
+    # The copy landed in the (faked) mounted volume and `diff -r` compared it before the move.
+    assert (node.tmp / "world" / "level.dat").read_text() == "a world"
+    assert (node.tmp / "server.properties").exists()
     # The old tree was moved aside, not consumed: every file is still there.
-    assert (node.srv / "lobby" / "data.pre-zvol" / "world" / "level.dat").exists()
-    assert (node.srv / "lobby" / "data.pre-zvol" / "server.properties").exists()
+    assert (node.aside / "world" / "level.dat").exists()
+    assert (node.aside / "server.properties").exists()
     assert node.data.is_dir() and not any(node.data.iterdir())
     assert any("lobby/data" in line and BY_ID in line for line in node.active_mounts())
     assert " rm " not in node.call_log() and "rm " not in node.call_log()
@@ -396,6 +426,43 @@ def test_migration_refuses_a_zvol_that_already_holds_data(node):
     # Nothing was copied and nothing was moved; the old tree is where it was.
     assert (node.data / "world" / "level.dat").exists()
     assert not (node.srv / "lobby" / "data.pre-zvol").exists()
+
+
+def test_migration_unmounts_and_refuses_when_the_copy_is_not_faithful(node):
+    """A copy that lost a file must leave the zvol unmounted, not mounted and half full."""
+    flaky = node.bin / "cp"
+    flaky.write_text(
+        "#!/usr/bin/env bash\n"
+        "# simulates a copy that silently lost a file\n"
+        "n=$#; dst=\"${!n}\"; n=$((n - 1)); src=\"${!n}\"\n"
+        'exec /bin/cp "$src/server.properties" "$dst/"\n'
+    )
+    flaky.chmod(0o755)
+    result = migrate(node)
+    assert result.returncode != 0
+    assert "REFUSE" in result.stderr and "differ" in result.stderr, result.stderr
+    # Unmounted on the way out: the next run must be able to try again.
+    assert node.active_mounts() == []
+    assert "umount " in node.call_log()
+    # Nothing was moved and the old tree is untouched.
+    assert (node.data / "world" / "level.dat").exists()
+    assert not node.aside.exists()
+
+
+def test_migration_names_the_old_tree_when_the_mount_fails(node):
+    """If `systemctl start` fails after the move, the operator must be told where the world is."""
+    result = migrate(node, env=node.env() | {"NODE_SYSTEMCTL_FAIL": "1"})
+    assert result.returncode != 0
+    assert str(node.aside) in result.stderr, result.stderr
+    assert (node.aside / "world" / "level.dat").exists()
+    assert node.data.is_dir() and not any(node.data.iterdir())
+
+
+def test_migration_rejects_a_node_name_that_is_not_a_fleet_node(node):
+    result = migrate(node, name="../lobby")
+    assert result.returncode == 2
+    assert "lobby plugins vanilla neoforge" in result.stderr, result.stderr
+    assert node.call_log() == ""
 
 
 def test_migration_refuses_when_a_previous_aside_is_still_there(node):
@@ -557,8 +624,20 @@ def test_create_nodes_owns_the_snippets_dir_and_attaches_data_disks():
     script = (REPO / "scripts" / "fleet" / "20-create-nodes.sh").read_text()
     assert "mkdir -p /var/coreos/snippets" in script
     # The data disks are attached on every create, never in the offline render path.
-    assert "15-ensure-data-disks.sh" in script
-    assert script.index("15-ensure-data-disks.sh") > script.index("if ((RENDER_ONLY)); then continue; fi")
-    # The destroy stays as it is, with the reason the world survives it next to it.
+    render_skip = script.index("if ((RENDER_ONLY)); then continue; fi")
+    assert script.index("15-ensure-data-disks.sh", render_skip) > render_skip
+    # The destroy stays as it is, and the header names the order that makes it safe: the
+    # world has to be on the zvol (and off scsi0) before this script may destroy a VM.
+    order = script[script.index("# ORDER MATTERS") : script.index("only irreversible one.")]
+    cursor = 0
+    for step in (
+        "15-ensure-data-disks.sh",
+        "tasks/gameserver.py",
+        "25-migrate-data.sh <node>",
+        "tasks/gameserver.py",
+        "THIS SCRIPT",
+    ):
+        cursor = order.index(step, cursor)  # ValueError = the order is not written down
+
     assert "qm destroy \\$VMID --purge" in script
     assert "survives qm destroy --purge" in script

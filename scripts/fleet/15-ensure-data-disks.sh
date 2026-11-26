@@ -47,7 +47,10 @@ for entry in "${NODES[@]}"; do
     echo "   zvol exists — not touching it"
   else
     echo "   zvol missing — needs creating (${MC_DATA_DISK_GB}G)"
-    actions+=("zfs create -V ${MC_DATA_DISK_GB}G $zvol")
+    # -p: `zfs create` does not create a missing parent, and a fresh host has no
+    # pool/mcdata at all. Without it the first real run aborts here with
+    # "parent 'pool/mcdata' does not exist" (the probe used a top-level pool/test-mcdata).
+    actions+=("zfs create -p -V ${MC_DATA_DISK_GB}G $zvol")
   fi
 
   config="$(ssh "$PVE_HOST" qm config "$vmid")" \

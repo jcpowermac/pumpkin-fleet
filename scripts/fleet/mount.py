@@ -10,6 +10,8 @@ import re
 
 BY_ID = "/dev/disk/by-id"
 _TYPE = re.compile(r'\bTYPE="?([\w-]+)')
+# blkid prints PTTYPE= when the device carries a partition table but no filesystem yet.
+_PTTYPE = re.compile(r"\bPTTYPE=")
 
 
 def data_device(node: str, by_id_listing: str, fallback: str) -> str:
@@ -20,8 +22,12 @@ def data_device(node: str, by_id_listing: str, fallback: str) -> str:
     stops instead of picking a disk.
     """
     name = node.lower()
+    # Anchored to a delimiter: an entry that merely embeds the node name
+    # (…_HARDDISK_blobby, …_lobby2) is not this node's disk, and silently preferring it
+    # over the pin is how the wrong volume gets mounted.
+    matches_node = re.compile(rf"(^|[-_.]){re.escape(name)}($|[-_.])")
     for entry in sorted(by_id_listing.split()):
-        if name in entry.lower():
+        if matches_node.search(entry.lower()):
             return f"{BY_ID}/{entry}"
     if fallback:
         return fallback
@@ -32,9 +38,17 @@ def data_device(node: str, by_id_listing: str, fallback: str) -> str:
 
 
 def filesystem_of(blkid_output: str) -> str | None:
-    """The filesystem `blkid` reports for the device, or None when it carries none."""
-    match = _TYPE.search(blkid_output or "")
-    return match.group(1) if match else None
+    """The filesystem `blkid` reports for the device, or None when it carries none.
+
+    A partition table with no filesystem on the device itself reports PTTYPE but no TYPE;
+    that is in use, not blank, and the caller must refuse rather than format it (mkfs.xfs's
+    own refusal is version-dependent and is not this fleet's contract).
+    """
+    text = blkid_output or ""
+    match = _TYPE.search(text)
+    if match:
+        return match.group(1)
+    return "partition-table" if _PTTYPE.search(text) else None
 
 
 def needs_format(blkid_output: str) -> bool:

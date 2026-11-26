@@ -23,6 +23,12 @@ for arg in "$@"; do
   esac
 done
 [[ -n "$NODE" ]] || { echo "usage: ${0##*/} [--dry-run] <node>" >&2; exit 2; }
+# NODE becomes both a path component and a unit name, so anything else is a mistake, not a
+# node: `..` would walk out of /srv and name a unit that cannot exist.
+case "$NODE" in
+  lobby|plugins|vanilla|neoforge) ;;
+  *) echo "usage: ${0##*/} [--dry-run] <node>   (node is one of: lobby plugins vanilla neoforge)" >&2; exit 2 ;;
+esac
 
 # Overridable only so the offline test can run this against a temp tree instead of /srv;
 # production always uses the defaults.
@@ -61,19 +67,26 @@ if ((!DRY_RUN)); then
   }
 fi
 run cp -a "$data/." "$tmp/"
-if ((!DRY_RUN)); then
-  before="$(cd "$data" && find . | wc -l)"
-  after="$(cd "$tmp" && find . | wc -l)"
-  [[ "$before" == "$after" ]] || {
-    echo "REFUSE: copied $after of $before entries — $data is untouched, $tmp holds a partial copy" >&2
-    exit 1
-  }
-  echo "   verified: $after entries copied"
+# `diff -r` compares what is there, byte for byte; equal entry counts do not mean a faithful
+# copy. Guarded so a difference unmounts the zvol before exiting — otherwise the next run
+# refuses with "already holds data" and hides the real reason.
+echo "   \$ diff -r $data $tmp"
+if ((!DRY_RUN)) && ! diff -r "$data" "$tmp" >&2; then
+  echo "REFUSE: $tmp differs from $data — nothing moved and $data is untouched (unmounting $tmp)" >&2
+  umount "$tmp"
+  exit 1
 fi
+((DRY_RUN)) || echo "   verified: $tmp matches $data"
 run umount "$tmp"
 run mv "$data" "$aside"
 run mkdir -p "$data"
-run systemctl start "$unit"
+# Named failure: after the move `set -e` would otherwise end the script with an empty
+# /srv/<node>/data and no word about where the world is.
+echo "   \$ systemctl start $unit"
+if ((!DRY_RUN)) && ! systemctl start "$unit"; then
+  echo "FAIL: $unit did not mount $device at $data — the old tree is $aside (moved, not deleted)" >&2
+  exit 1
+fi
 if ((!DRY_RUN)); then
   mountpoint -q "$data" \
     || { echo "FAIL: $data is not a mountpoint after the migration; the old tree is $aside" >&2; exit 1; }

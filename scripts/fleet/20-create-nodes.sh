@@ -14,6 +14,23 @@
 # pve3 contact — no ssh/scp, no qm, and no sssd bind credential fetch. That render is for
 # review/diff only (its sssd bind fields come out empty), which is what makes a node rebuild
 # reviewable without a host key. tests/test_create_nodes_render.sh proves the offline half.
+#
+# ORDER MATTERS, and this script is the last step, not the first: the destroy below takes
+# the whole VM including its scsi0, and a world that has not been moved to the host-owned
+# zvol yet goes with it. On node 201 that is the situation today (`scsi0` is
+# pool:vm-201-disk-0 and the world is on it). Run, in this order:
+#
+#   1. scripts/fleet/15-ensure-data-disks.sh       create pool/mcdata/<node> and attach
+#                                                  scsi1 to the node that is STILL RUNNING
+#   2. pyinfra … tasks/gameserver.py               writes the .mount unit, then refuses a
+#                                                  /srv/<node>/data that is not mounted yet
+#   3. scripts/fleet/25-migrate-data.sh <node>     on the node: copy the old tree onto the
+#                                                  zvol, then move it to data.pre-zvol
+#   4. pyinfra … tasks/gameserver.py               mounts it, ownership, container starts
+#   5. THIS SCRIPT                                 only now may a VM be destroyed
+#
+# Steps 1-2 and 4 are idempotent, so repeat them freely; step 3 refuses when the old tree is
+# empty or the zvol already holds data; step 5 is the only irreversible one.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
