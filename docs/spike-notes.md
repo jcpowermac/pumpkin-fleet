@@ -402,7 +402,11 @@ exists:
 4. **firewalld (FedoraServer zone) drops the game port.** uCore enables firewalld
    with only ssh/cockpit open; the port bind lands on the host interface and is
    dropped. Fix: `firewall-cmd --add-port=25565/tcp --permanent && reload`.
-   Does not survive an OSTree rebase — revisit for Task 7 Step 3.
+   **Survives an OSTree rebase** — verified on 201 after the uCore → `pumpkin-os`
+   rebase: `firewall-cmd --list-ports` still shows `25565/tcp 3000/tcp`, and the polkit,
+   sudoers and sssd drop-ins are all there. rpm-ostree persists locally added `/etc`
+   drop-ins; only state *inside* a file the base image also ships can be rewritten by its
+   three-way /etc merge (`FedoraServer.xml.old`).
 5. **The game container runs as `core`, so cockpit only shows it in a PRIVILEGED
    session.** Rootless podman puts it in core's store
    (`/run/user/1000/podman/podman.sock`); jcallen (uid 2007) has an empty store of his
@@ -441,6 +445,15 @@ exists:
         --unix-socket /run/user/1000/podman/podman.sock \
         http://d/v5.0.0/libpod/containers/json?all=true
    ```
+
+6. **A `podman run` container blocks the quadlet unit that replaces it.** Quadlet's
+   `ContainerName=<node>` is the name the old deploy used, so `systemctl --user start
+   <node>.service` fails ("container name already in use") until the old one is gone. And
+   `podman rm -f` is not the way to remove it: it SIGKILLs the JVM and a loaded world loses
+   whatever it had not flushed. `tasks/gameserver.py` therefore hands it over with
+   `podman stop --time 60` — the same grace the unit's `--stop-timeout` gives — and only when
+   `<node>.service` is not already active, so the handover happens once and a redeploy never
+   touches a container the unit owns.
 
 **Verifying a server is really up:** `scripts/mc-ping.py <ip> 25565` does a real
 protocol-777 status ping (varint framing; the server never acks the handshake — it

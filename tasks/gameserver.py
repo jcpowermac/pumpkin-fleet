@@ -1,20 +1,26 @@
-"""Fleet game containers: pull the pinned image from ghcr.io, run under podman.
+"""Fleet game containers: a quadlet unit per node, following an image channel tag.
 
-Image pins live in containers/images.json (single source of truth). Container
-flags follow containers/README.md "Running one". Data dir is bind-mounted at
-/data (seeded once by the entrypoint, survives OS rebases).
+The unit is the desired state and podman is the reconciler: `AutoUpdate=registry` makes
+podman's own timer converge the node on whatever the channel tag points at, so a new
+image arrives without an ssh session. Channels and the reboot window come from
+configs/pins.env; the canary node (by name) follows the pre-promotion channel. Data dir
+is bind-mounted at /data (seeded once by the entrypoint, survives OS rebases).
 
 Usage: uv run pyinfra inventory/hosts.py --limit lobby tasks/gameserver.py
 """
 import base64
-import hashlib
 import json
+import sys
 from pathlib import Path
 
 from pyinfra import host
 from pyinfra.operations import files, server
 
 REPO = Path(__file__).resolve().parent.parent
+# scripts/ holds plain scripts, not a package; pyinfra runs this from tasks/.
+sys.path.insert(0, str(REPO / "scripts"))
+import render_quadlet  # noqa: E402
+
 IMAGES = json.loads((REPO / "containers" / "images.json").read_text())
 REGISTRY = "ghcr.io/jcpowermac/pumpkin-fleet"
 
@@ -26,11 +32,34 @@ WORKLOADS = {
     "neoforge": ("neoforge", "6g", "4G"),
 }
 
+
+def _pin(key: str) -> str:
+    for line in (REPO / "configs" / "pins.env").read_text().splitlines():
+        name, _, value = line.partition("=")
+        if name.strip() == key:
+            return value.split("#")[0].strip().strip('"')
+    raise KeyError(f"{key} is missing from configs/pins.env")
+
+
+def _push(name: str, text: str, dest: str, *, sudo: bool) -> None:
+    """Paste multi-line text with base64-to-tee — the same way the polkit rule is written."""
+    privileged = "sudo " if sudo else ""
+    server.shell(
+        name=name,
+        commands=(
+            f"echo {base64.b64encode(text.encode()).decode()} "
+            f"| base64 -d | {privileged}tee {dest} >/dev/null"
+        ),
+    )
+
+
 node = host.name
 image_name, mem, java_mem = WORKLOADS[node]
-image = f"{REGISTRY}/{image_name}:{next(i['version'] for i in IMAGES if i['name'] == image_name)}"
+image = f"{REGISTRY}/{image_name}"
+channel = _pin("FLEET_CHANNEL_CANARY") if node == _pin("CANARY_NODE") else _pin("FLEET_CHANNEL")
 ip = host.data.ssh_hostname
 data_dir = f"/srv/{node}/data"
+unit = f"~/.config/containers/systemd/{node}.container"
 
 # Rootless podman containers die with the SSH session that started them unless
 # the user lingers (logind tears down user@N and its container scopes).
@@ -96,57 +125,83 @@ server.shell(
 server.shell(name="Enable podman.socket (user unit)", commands="systemctl --user enable --now podman.socket")
 
 server.shell(
-    name=f"Pull {image} (skip if already local)",
-    commands=f"podman image exists {image} || podman pull {image}",
+    name=f"Pull {image}:{channel} (skip if already local)",
+    commands=f"podman image exists {image}:{channel} || podman pull {image}:{channel}",
 )
 
-# Plugins ship inside the image now (CI bakes them from containers/images.json),
-# so there is nothing to fetch here. The only thing the deploy still needs to know
-# is whether this node's image carries OPanel, whose web panel serves on 3000.
+# Plugins ship inside the image (CI bakes them from containers/images.json), so there is
+# nothing to fetch here. The only thing the deploy still needs to know is whether this
+# node's image carries OPanel, whose web panel serves on 3000.
 plugins = next(i for i in IMAGES if i["name"] == image_name).get("plugins", [])
 opanel = next((p for p in plugins if p["name"] == "opanel"), None)
-# Recreating the container wipes OPanel's in-memory session registry, so every
-# logged-in browser is 401'd (their JWT is still signed and unexpired, but no
-# longer "active"), which shows up as "Unable to connect to the server" plus
-# "Unable to connect to the WebSocket of terminal". Upstream /api/auth/check is
-# broken (500) so the panel never bounces to login either. So only recreate when
-# the deployment inputs actually change; --restart=unless-stopped covers reboots.
-# EULA is the operator's acceptance of Mojang's terms; every image takes it and the
-# ones that need it (papermc/neoforge/fabric) exit without it.
-_env = f"--env EULA=true --env JAVA_MEMORY={java_mem}"
-_desired = hashlib.sha256(
-    f"{image} {mem} {_env} {(opanel or {}).get('sha256', '')}".encode()
-).hexdigest()
-_pin_file = f"~/.fleet-{node}.pin"
+
+# --- the container's unit -------------------------------------------------
+# A user unit, because the server runs rootless as `core`. Quadlet generates the
+# service from this file, so it is never `systemctl enable`d: boot starts come from the
+# `[Install]` section the generator applies on every daemon-reload (podman-systemd.unit(5)).
+server.shell(name="Create the quadlet unit directory", commands="mkdir -p ~/.config/containers/systemd")
+_push(
+    name=f"Install the {node} quadlet unit",
+    text=render_quadlet.render_container_unit(node, image, channel, mem, java_mem, data_dir),
+    dest=unit,
+    sudo=False,
+)
+# Hand over any container an earlier `podman run` deploy left under this name: the unit
+# refuses to start while the name is taken, and `podman rm -f` would SIGKILL a loaded world.
+server.shell(name=f"Hand any pre-quadlet {node} container over to the unit", commands=render_quadlet.handover_command(node))
+# `start` on an already-running unit is a no-op, so a redeploy never bounces a live
+# server; a new image arrives through podman-auto-update.timer instead.
 server.shell(
-    name=f"Run {node} server container",
-    commands=(
-        f'if [ "$(cat {_pin_file} 2>/dev/null)" = "{_desired}" ] '
-        f'&& [ -n "$(podman ps -q --filter name=^{node}$)" ]; then '
-        f'echo "{node} already up on this pin, not restarting"; exit 0; fi; '
-        f"podman rm -f {node} 2>/dev/null || true; "
-        f"podman run -d --name {node} --init "
-        f"--restart=unless-stopped "
-        f"--memory {mem} --stop-timeout 60 "
-        f"--network=host "
-        f"-v {data_dir}:/data:Z "
-        f"{_env} "
-        f"{image} "
-        f">/dev/null && echo {_desired} > {_pin_file}"
-    ),
+    name=f"Start {node}.service",
+    commands=f"systemctl --user daemon-reload && systemctl --user start {node}.service",
+)
+# The timer ships at both system and user level; the user one is the one that matches
+# rootless quadlets. It compares the local digest with what the channel tag now points
+# at, pulls, and restarts the unit.
+server.shell(
+    name="Enable podman-auto-update.timer (user unit)",
+    commands="systemctl --user enable --now podman-auto-update.timer",
+)
+
+# --- the reboot window ----------------------------------------------------
+# Bare-metal reboot, so these are *system* units (/etc). The gate reads the node's own
+# server over mc-ping, so both files are deployed with it.
+_reboot_timer, _reboot_service = render_quadlet.render_reboot_units(node, _pin("REBOOT_ONCALENDAR"))
+server.shell(name=f"Create {render_quadlet.FLEET_LIB}", commands=f"mkdir -p {render_quadlet.FLEET_LIB}", _sudo=True)
+_push(
+    name="Install mc-ping.py (the reboot gate's probe)",
+    text=(REPO / "scripts" / "mc-ping.py").read_text(),
+    dest=f"{render_quadlet.FLEET_LIB}/mc-ping.py",
+    sudo=True,
+)
+_push(
+    name="Install reboot-gate.py",
+    text=(REPO / "scripts" / "fleet" / "reboot-gate.py").read_text(),
+    dest=f"{render_quadlet.FLEET_LIB}/reboot-gate.py",
+    sudo=True,
+)
+_push(
+    name="Install fleet-reboot.service",
+    text=_reboot_service,
+    dest=f"{render_quadlet.REGISTRY_UNITS}/fleet-reboot.service",
+    sudo=True,
+)
+_push(
+    name="Install fleet-reboot.timer",
+    text=_reboot_timer,
+    dest=f"{render_quadlet.REGISTRY_UNITS}/fleet-reboot.timer",
+    sudo=True,
 )
 server.shell(
-    name=f"Wait for {node} to open port 25565",
-    commands=(
-        "for i in $(seq 1 60); do "
-        f"timeout 2 bash -c 'exec 3<>/dev/tcp/{ip}/25565' 2>/dev/null && exit 0; "
-        "sleep 2; done; "
-        "echo '{node} port 25565 never opened'; podman logs --tail 50 {node}; exit 1"
-    ).format(node=node),
+    name="Enable fleet-reboot.timer",
+    commands="systemctl daemon-reload && systemctl enable --now fleet-reboot.timer",
+    _sudo=True,
 )
-# uCore runs firewalld (FedoraServer zone) with only ssh/cockpit open; the
-# container port bind lands on the host interface and is dropped otherwise.
-# (Does not survive an OSTree rebase — revisit for Task 7 Step 3.)
+
+# uCore runs firewalld (FedoraServer zone) with only ssh/cockpit open; the container
+# port bind lands on the host interface and is dropped otherwise. These `/etc` drop-ins
+# survive an OSTree rebase — verified on 201 across the uCore -> pumpkin-os rebase
+# (spike-notes §16.4).
 server.shell(
     name=f"Allow 25565/tcp through firewalld",
     commands="firewall-cmd --add-port=25565/tcp --permanent && firewall-cmd --reload",
@@ -154,14 +209,24 @@ server.shell(
 )
 # OPanel listens on 3000 by default (host networking, so no mapping). It is a
 # plugin in the manifest, so the rule follows whichever image declares it — currently
-# fabric only. Internal until Task 7 Step 5 puts authentik OIDC + the Traefik route
-# in front of it.
+# fabric only. Internal until authentik OIDC + the Traefik route are in front of it.
 if opanel:
     server.shell(
         name="Allow 3000/tcp (OPanel) through firewalld",
         commands="firewall-cmd --add-port=3000/tcp --permanent && firewall-cmd --reload",
         _sudo=True,
     )
+# After the firewall rule, not before: the probe hits this node's own host address, which
+# firewalld's zone drops on a node where 25565 was never opened.
+server.shell(
+    name=f"Wait for {node} to open port 25565",
+    commands=(
+        "for i in $(seq 1 60); do "
+        f"timeout 2 bash -c 'exec 3<>/dev/tcp/{ip}/25565' 2>/dev/null && exit 0; "
+        "sleep 2; done; "
+        f"echo '{node} port 25565 never opened'; podman logs --tail 50 {node}; exit 1"
+    ),
+)
 server.shell(
     name=f"{node} answers on {ip}:25565",
     commands=f"timeout 2 bash -c 'exec 3<>/dev/tcp/{ip}/25565' || exit 1",
