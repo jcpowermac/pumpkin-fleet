@@ -422,3 +422,70 @@ def test_check_exits_2_for_an_incompatible_upstream(monkeypatch, tmp_path, capsy
     assert rp.main(["--check"]) == 2
     assert "2.22.0" in capsys.readouterr().out
     assert path.read_text() == before
+
+
+def _opanel_entry(monkeypatch):
+    """The fabric OPanel pin as the resolver resolves it: newest *fabric* build, which for
+    OPanel is an older MC than the fleet's 26.3 — so the entry is flagged stale."""
+    monkeypatch.setattr(rp, "fetch_json", _fetch({"repos/opanel-mc/opanel": _fixture("github_opanel.json")}))
+    monkeypatch.setattr(rp, "sha256_of_url", lambda url, dest: "d" * 64)
+    resolved = rp.resolve_github(rp.Plugin(name="opanel", slug="opanel-mc/opanel", source="github",
+                                          install_as="opanel-fabric.jar", mc=["26.3"]), "fabric")
+    assert resolved.stale
+    return {"name": "opanel", "slug": "opanel-mc/opanel", "source": "github", "mc": ["26.3"],
+            "install_as": "opanel-fabric.jar", "version": resolved.version, "url": resolved.url,
+            "sha256": resolved.sha256, "deps": [], "note": resolved.note, "stale": True}
+
+
+def test_dry_run_reports_a_stale_pin_that_the_resolver_refused(monkeypatch, tmp_path, capsys):
+    """opanel has no fabric build for 26.3, so the pin is the newest one that installs at all
+    and it is already committed: it appears in no change row. A bump PR that never says so
+    leaves the reviewer to find the staleness in images.json by hand."""
+    path = tmp_path / "images.json"
+    monkeypatch.setattr(rp, "MANIFEST", path)
+    pinned = _opanel_entry(monkeypatch)
+    before = json.dumps([{"name": "fabric", "version": "26.3-0.20.1-p1", "plugins": [pinned]}],
+                        indent=2) + "\n"
+    path.write_text(before)
+
+    assert rp.main(["--dry-run"]) == 0, "nothing is actionable: the pin is the newest compatible build"
+    body = capsys.readouterr().out
+    assert "Staleness" in body
+    assert "opanel" in body and "26.1" in body and "26.3" in body
+    assert path.read_text() == before, "--dry-run still writes nothing"
+
+
+def test_body_states_the_mc_verdict_and_the_dependency_it_adds(monkeypatch, tmp_path, capsys):
+    """The reviewer's two questions are per plugin: does it install on the pinned MC, and what
+    else does taking it drag in? Both are answered in the body, not by reading the manifest."""
+    path = tmp_path / "images.json"
+    monkeypatch.setattr(rp, "MANIFEST", path)
+    monkeypatch.setattr(rp, "fetch_json", _fetch({
+        "versions": _synthetic_hangar(True),
+        "projects/12": _fixture("hangar_dep_projects.json")["12"],
+    }))
+    seed = {"name": "Foo", "slug": "foo", "source": "hangar", "mc": ["26.3"], "install_as": "Foo.jar"}
+    path.write_text(json.dumps([{"name": "papermc", "version": "26.3-258-p1", "plugins": [dict(seed)]}],
+                               indent=2) + "\n")
+
+    assert rp.main(["--dry-run"]) == 2
+    body = capsys.readouterr().out
+    assert "26.3 compatible" in body
+    assert "+ViaBackwards" in body, "the required dependency this PR adds is named on its parent"
+    assert "(new) 1.0" in body, "and the entry it adds is marked as new"
+
+
+def test_a_bumped_manifest_passes_the_gate(monkeypatch, tmp_path):
+    """The PR this bot opens has to pass scripts/ci_gate.py. Prove it on the resolver's own
+    output: a plugin pin forced stale, bumped, then gated against the manifest it replaced."""
+    import ci_gate
+
+    path = _papermc_only(monkeypatch, tmp_path)
+    base = _manifest_with_via("26.3-258-p1")
+    path.write_text(json.dumps(base, indent=2) + "\n")
+
+    assert rp.main(["--bump"]) == 0
+    head = json.loads(path.read_text())
+    assert head[0]["version"] == "26.3-258-p2"
+    assert ci_gate.gate(base, head) == []
+    assert ci_gate.gate(base, base) == [], "an unchanged manifest is clean too"

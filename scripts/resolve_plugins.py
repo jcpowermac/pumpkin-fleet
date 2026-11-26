@@ -159,10 +159,15 @@ def _hangar_deps(p: Plugin, declared: list[dict]) -> list[dict]:
     return sorted(deps, key=lambda dep: dep["slug"])
 
 
+def dep_install_as(dep: dict) -> str:
+    """The jar name a required dependency lands under."""
+    return f"{dep['name']}.jar"
+
+
 def expand_hangar_deps(p: Plugin) -> list[Plugin]:
     """p.deps as plugin seeds, ready to be declared. `p` must already be resolved."""
     return [Plugin(name=dep["name"], slug=dep["slug"], source="hangar",
-                   install_as=f"{dep['name']}.jar", mc=list(p.mc)) for dep in p.deps]
+                   install_as=dep_install_as(dep), mc=list(p.mc)) for dep in p.deps]
 
 
 def resolve_modrinth(p: Plugin, mc: str, loader: str) -> Plugin:
@@ -297,27 +302,47 @@ def bump_revision(version: str) -> str:
     return f"{match.group(1)}-p{int(match.group(2)) + 1}" if match else f"{version}-p1"
 
 
-def plan(manifest: list[dict], only: str | None = None) -> tuple[list[dict], list[str], list[tuple[str, str, str]]]:
+def mc_verdict(entry: dict) -> str:
+    """Whether the resolved artifact installs on the pinned MC. A GitHub release carries no MC
+    metadata, so there the answer is the asset/note the resolver had to read; a manual entry is
+    a human's promise and is not verified against the MC at all."""
+    mc = "/".join(entry.get("mc") or []) or "no MC"
+    if entry.get("source") == "manual":
+        return f"{mc} manual (unverified)"
+    return f"{mc} stale" if entry.get("stale") else f"{mc} compatible"
+
+
+def plan(manifest: list[dict], only: str | None = None
+         ) -> tuple[list[dict], list[str], list[tuple[str, str, str]], list[str]]:
     """Resolve the manifest in memory: fill the artifact fields, and move an image's -pN when a
     resolved plugin's artifact identity (version, url or sha256) moved or the plugin set grew.
-    Returns (changes, problems, revised); nothing is written."""
+    Returns (changes, problems, revised, stale); nothing is written."""
     changes: list[dict] = []
     problems: list[str] = []
     revised: list[tuple[str, str, str]] = []
+    stale: list[str] = []
     for image in manifest:
         if (only and image["name"] != only) or not image.get("plugins"):
             continue
         before = {plugin["install_as"]: plugin for plugin in image["plugins"]}
         image["plugins"] = resolve_manifest(manifest, image, problems)
+        added = {entry["install_as"] for entry in image["plugins"]} - set(before)
         moved = False
         for entry in image["plugins"]:
+            # A stale pin resolves to what it already says, so it is in no change row: the body
+            # has to report it separately or a reviewer never learns the pin is behind.
+            if entry.get("stale"):
+                stale.append(f"{image['name']}/{entry['name']}: pinned {entry.get('version')} — "
+                             f"{entry.get('note') or 'upstream has no build for the pinned MC'}")
             old = before.get(entry["install_as"], {})
             if old == entry:
                 continue
             changes.append({"image": image["name"], "name": entry["name"], "source": entry["source"],
                             "old": old.get("version"), "new": entry.get("version"),
                             "url": entry.get("url"), "sha256": entry.get("sha256"),
-                            "note": entry.get("note", "")})
+                            "note": entry.get("note", ""), "mc": mc_verdict(entry),
+                            "added_deps": [dep["name"] for dep in entry.get("deps") or []
+                                           if dep.get("required") and dep_install_as(dep) in added]})
             # A first resolution only fills empty fields. After that, any move in artifact
             # identity — version, url or sha256 — is a new revision, because an image tag is
             # defined by the bytes it installs and is never re-pushed with different content.
@@ -328,25 +353,38 @@ def plan(manifest: list[dict], only: str | None = None) -> tuple[list[dict], lis
             old_version = image["version"]
             image["version"] = bump_revision(old_version)
             revised.append((image["name"], old_version, image["version"]))
-    return changes, problems, revised
+    return changes, problems, revised, stale
 
 
-def pr_body(changes: list[dict], problems: list[str], revised: list[tuple[str, str, str]]) -> str:
+def pr_body(changes: list[dict], problems: list[str], revised: list[tuple[str, str, str]],
+            stale: list[str]) -> str:
+    """The bump PR's body: what moved, on which MC, what it drags in — then what the resolver
+    refused to move (a stale pin, or an upstream it could not use)."""
     lines = ["Resolve plugin versions, urls and sha256s in `containers/images.json`.", ""]
     for image, old_version, new_version in revised:
         lines.append(f"- `{image}`: `{old_version}` -> `{new_version}` (plugin artifacts changed)")
     if revised:
         lines.append("")
-    lines += ["| image | plugin | source | version | sha256 |", "|---|---|---|---|---|"]
-    for change in changes:
-        version = f"{change['old']} -> {change['new']}" if change["old"] else change["new"]
-        if change["note"]:
-            version += f" — {change['note']}"
-        lines.append(f"| {change['image']} | {change['name']} | {change['source']} | {version} "
-                     f"| {change['sha256']} |")
-    lines += ["", "Artifacts:"]
-    for change in changes:
-        lines.append(f"- {change['image']}/{change['name']}: {change['url']}")
+    if changes:
+        lines += ["| image | plugin | source | version | mc | deps added | sha256 |",
+                  "|---|---|---|---|---|---|---|"]
+        for change in changes:
+            if change["old"]:
+                version = f"{change['old']} -> {change['new']}"
+            else:
+                version = f"(new) {change['new']}"
+            if change["note"]:
+                version += f" — {change['note']}"
+            deps = ", ".join(f"+{name}" for name in change["added_deps"])
+            lines.append(f"| {change['image']} | {change['name']} | {change['source']} | {version} "
+                         f"| {change['mc']} | {deps} | {change['sha256']} |")
+        lines += ["", "Artifacts:"]
+        for change in changes:
+            lines.append(f"- {change['image']}/{change['name']}: {change['url']}")
+    if stale:
+        lines += ["", "## Staleness — upstream has nothing newer that installs on the pinned MC",
+                  "The pin stays where it is: this PR does not move it."]
+        lines += [f"- {entry}" for entry in stale]
     if problems:
         lines += ["", "## Left alone (no compatible release, or a manual artifact that no longer matches)"]
         lines += [f"- {problem}" for problem in problems]
@@ -364,8 +402,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     manifest = json.loads(MANIFEST.read_text())
-    changes, problems, revised = plan(manifest, args.only)
-    print(pr_body(changes, problems, revised), end="")
+    changes, problems, revised, stale = plan(manifest, args.only)
+    print(pr_body(changes, problems, revised, stale), end="")
     if args.bump:
         if changes:
             MANIFEST.write_text(json.dumps(manifest, indent=2) + "\n")
