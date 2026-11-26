@@ -1,29 +1,31 @@
 [
   {
-    "name": "pumpkin",
-    "version": "0.2.2-26.3-26.60",
-    "args": {
-      "PUMPKIN_RELEASE": "0.2.2%2B26.3-26.60",
-      "PUMPKIN_SHA256": "3755df414cdece664223388a93421c5c674682f5b9264387416b8a9074cd8d59",
-      "PATCHBUKKIT_VERSION": "0.2.2",
-      "PATCHBUKKIT_SHA256": "d4db46ed76d5f8c2306b225343f17ee60dc140ffb2fd412292d098bb8e9aacdf"
-    },
-    "plugins": {
-      "opanel": {
-        "version": "2.2.11",
-        "url": "https://worker.opanel.cn/download/2.2.11/opanel-pumpkin-x86_64-unknown-linux-gnu-build-2.2.11.so",
-        "sha256": "9b6f0d6cc2ff2ade96f53ef212d425377d25a89c9bc40e0556198d66d577881e",
-        "_note": "Native Pumpkin plugin (cdylib). Statically links Pumpkin's API, so it is VERSION-LOCKED to this entry's pumpkin version: bump both together or the server panics on load (see opanel.cn/docs/versions). Installed into the /data volume, not the image, so its 111 MB never ships in every layer."
-      }
-    }
-  },
-  {
     "name": "papermc",
-    "version": "26.3-258",
+    "version": "26.3-258-p1",
     "args": {
       "PAPER_VERSION": "26.3-258",
       "PAPER_SHA256": "c5df5fb9f6155e48380c67c6e2b2dc2581b7db1a4b665d2c3818057b7efb6692"
-    }
+    },
+    "plugins": [
+      {
+        "name": "LuckPerms",
+        "slug": "luckperms",
+        "source": "modrinth",
+        "mc": ["26.3"],
+        "install_as": "LuckPerms.jar"
+      },
+      {
+        "name": "ViaVersion",
+        "slug": "viaversion",
+        "source": "hangar",
+        "mc": ["26.3"],
+        "install_as": "ViaVersion.jar"
+      }
+    ],
+    "excluded": [
+      {"name": "EssentialsX", "_note": "considered: no 26.3-compatible release yet"},
+      {"name": "Vault", "_note": "considered: no scriptable source (SpigotMC download needs a session)"}
+    ]
   },
   {
     "name": "neoforge",
@@ -31,7 +33,8 @@
     "args": {
       "NEOFORGE_VERSION": "26.3.0.115",
       "NEOFORGE_SHA256": "e451494c07ef7ba090f17e3c5debdc318237db29304a40ce10f7433284db6a2a"
-    }
+    },
+    "plugins": []
   },
   {
     "name": "velocity",
@@ -39,11 +42,12 @@
     "args": {
       "VELOCITY_VERSION": "4.3.1-45",
       "VELOCITY_SHA256": "0844bcabdcdb4f5b875906fd4c3365bc1bb76918e42bc595ed88ad195258dd75"
-    }
+    },
+    "plugins": []
   },
   {
     "name": "fabric",
-    "version": "26.3-0.20.1",
+    "version": "26.3-0.20.1-p1",
     "args": {
       "FABRIC_MC": "26.3",
       "FABRIC_LOADER": "0.20.1",
@@ -51,12 +55,29 @@
       "OPANEL_VERSION": "2.2.11",
       "OPANEL_ASSET": "opanel-fabric-26.1-build-2.2.11.jar"
     },
-    "plugins": {
-      "opanel": {
-        "version": "2.2.11",
-        "bundled": true,
-        "_note": "Baked into the image and seeded into /data/mods by the entrypoint. Unlike pumpkin's native cdylib this is a plain mod jar, so it is not version-locked to the server build; it does need fabric-api, which the image also bundles."
+    "plugins": [
+      {
+        "name": "fabric-api",
+        "slug": "FabricMC/fabric",
+        "source": "github",
+        "mc": ["26.3"],
+        "install_as": "fabric-api.jar"
+      },
+      {
+        "name": "opanel",
+        "slug": "opanel-mc/opanel",
+        "source": "github",
+        "mc": ["26.3"],
+        "install_as": "opanel-fabric.jar"
+      },
+      {
+        "name": "LuckPerms",
+        "slug": "luckperms",
+        "source": "modrinth",
+        "mc": ["26.3"],
+        "install_as": "LuckPerms.jar"
       }
-    }
+    ],
+    "_note": "Not yet resolved from this list: the Dockerfile still fetches the two github plugins by its own ADD lines (FABRIC_API / OPANEL args) and seeds them under their upstream filenames. Task 3 replaces that with the plugin build stage, which installs them as install_as."
   }
 ]

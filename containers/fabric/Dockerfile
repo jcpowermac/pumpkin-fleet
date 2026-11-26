@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 # Fabric server (+ OPanel) on Eclipse Temurin 25 / UBI 10 minimal (glibc) — the
-# same base as every other image in this directory. glibc, not Alpine: it is the
-# only base all five images can share (the pumpkin binary cannot run on musl).
+# same base as every other image in this directory. glibc, not Alpine: neoforge
+# pulls glibc-built natives (netty's native epoll, and mods can ship their own),
+# and one base has to cover all four.
 #
 # There is no downloadable self-contained Fabric server jar: the loader's GitHub
 # releases carry no assets, maven ships only the loader library, and Fabric's meta
@@ -44,7 +45,7 @@ COPY entrypoint.sh /opt/entrypoint.sh
 # mkdir first: ADD from a URL creates implicit parents as 0644, which uid 1000
 # cannot traverse.
 #
-# OPanel is a plain mod jar here (not Pumpkin's native cdylib), and it hard-depends
+# OPanel is a plain mod jar here, and it hard-depends
 # on Fabric API — without it the loader refuses to start with
 # "Mod 'OPanel' requires any version of fabric-api".
 RUN mkdir -p -m 0755 /opt/bundled-mods

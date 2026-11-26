@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Paper server on Eclipse Temurin 25 / UBI 10 minimal (glibc) — one base for the
-# whole family. glibc, not Alpine: it is the only base all five images can share
-# (the pumpkin binary cannot run on musl).
+# whole family. glibc, not Alpine: neoforge pulls glibc-built natives (netty's
+# native epoll, and mods can ship their own), and one base has to cover all four.
 FROM eclipse-temurin:25-jre-ubi10-minimal
 
 ARG PAPER_VERSION

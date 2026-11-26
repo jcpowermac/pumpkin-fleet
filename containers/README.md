@@ -1,31 +1,30 @@
 # Container images
 
-Five server images, built by GitHub Actions (`.github/workflows/containers.yml`) and
+Four server images, built by GitHub Actions (`.github/workflows/containers.yml`) and
 pushed to **ghcr.io**. The uCore VMs only ever pull — they need no build toolchain, no
 source checkout, and no JDK.
 
-`images.json` is the single source of truth for versions and sha256 pins. The workflow
-reads it to build its matrix; edit it and push to bump anything.
+`images.json` is the single source of truth for versions, sha256 pins and the plugins
+each image carries. The workflow reads it to build its matrix; edit it and push to bump
+anything.
 
 | image | version | artifact | why |
 |---|---|---|---|
-| `pumpkin` | `0.2.2-26.3-26.60` | `pumpkin-X64-Linux` + `libpatchbukkit-X64-Linux.so` | Rust server, no JVM for the server itself; PatchBukkit needs a JRE 25 for plugin jars |
-| `papermc` | `26.3-258` | `paper-26.3-258.jar` | Bukkit/Paper plugin API |
+| `papermc` | `26.3-258-p1` | `paper-26.3-258.jar` | Bukkit/Paper plugin API |
 | `neoforge` | `26.3.0.115` | installer, resolved at build | modded server |
 | `velocity` | `4.3.1-45` | `velocity-4.3.1-45.jar` | proxy; Velocity 4 requires Java 25 |
-| `fabric` | `26.3-0.20.1` | installer-resolved | Fabric server + OPanel; loader, libraries and Mojang jar are generated at build |
+| `fabric` | `26.3-0.20.1-p1` | installer-resolved | Fabric server + OPanel; loader, libraries and Mojang jar are generated at build |
 
-**One base for all five:** `eclipse-temurin:25-jre-ubi10-minimal` (glibc, 136 MB
+**One base for all four:** `eclipse-temurin:25-jre-ubi10-minimal` (glibc, 136 MB
 compressed), kept current by Adoptium. `fabric` additionally uses the
 `25-jdk-ubi10-minimal` variant in its build stage, because the Fabric installer is a
 JDK app; nothing from that stage ships.
 
 Why one base, and why this one:
 
-- **glibc is forced by `pumpkin`.** The Rust binary's interpreter is
-  `/lib64/ld-linux-x86-64.so.2`, so it cannot run on musl — and a base shared by all
-  five therefore cannot be Alpine. `neoforge` needs glibc too (netty's native epoll,
-  and mods can ship glibc natives).
+- **glibc, not musl, because of `neoforge`.** It pulls netty's native epoll
+  (`linux-x86_64`, glibc-built) and mods can ship glibc natives — and a base shared by
+  all four therefore cannot be Alpine.
 - **Temurin, not a hand-rolled Debian.** Adoptium publishes `alpine`, `jammy`, `noble`,
   `resolute` and `ubi10-minimal` — there is no Debian family. A `debian:slim` base would
   mean installing the JRE ourselves from a tarball or a second apt repo, i.e. a second
@@ -36,7 +35,8 @@ Why one base, and why this one:
   136 MB.
 - UBI minimal specifics: it has no `util-linux`, so **`/usr/sbin/nologin` does not exist** —
   the service account uses `-s /bin/false`. It also has **no `tini`** (not in the UBI
-  repos, no `catatonit` either), so `pumpkin` relies on the runtime's `--init`.
+  repos, no `catatonit` either), so reaping a server's child processes falls to the
+  runtime's `--init`, which the fleet always passes.
 - Base images are pinned by tag, not digest, so a rebuild can pick up a new base. Pin by
   `@sha256:` if that ever matters.
 
@@ -75,7 +75,7 @@ Deliberately minimal, per <https://exa.y2k.diy/garden/jvm-args/>:
 - `-XX:+ExitOnOutOfMemoryError` is the one addition, and it is operational rather than a
   tuning flag: an OOM'd server must die so the unit restarts instead of hanging.
 
-Tune the heap with `JAVA_MEMORY` (per image default: pumpkin/papermc `2G`, neoforge `4G`,
+Tune the heap with `JAVA_MEMORY` (per image default: papermc/fabric `2G`, neoforge `4G`,
 velocity `512M`–`1G`). Extra flags go in `JAVA_OPTS`.
 
 ## Running one
@@ -86,16 +86,16 @@ podman run -d --name lobby --init \
   -p 10.10.10.54:25565:25565 \
   -v /srv/lobby/data:/data:Z \
   -e JAVA_MEMORY=2G \
-  ghcr.io/<owner>/pumpkin-fleet/pumpkin:0.2.2-26.3-26.60
+  ghcr.io/<owner>/pumpkin-fleet/papermc:26.3-258-p1
 ```
 
 Notes:
 
-- `--init` is **required** for `pumpkin`: PatchBukkit forks a child JVM and the image has
-  no `tini` (UBI has no such package), so without `--init` children are never reaped.
+- `--init` is what reaps the server's child processes: the images have no `tini` (UBI has
+  no such package).
 - `--stop-timeout 60` gives the server time to save and shut down cleanly on `SIGTERM`.
 - `EULA=true` is required for `papermc`, `neoforge` and `fabric`; without it the container
-  has no `eula.txt` and the server refuses to start. `pumpkin` and `velocity` need no EULA.
+  has no `eula.txt` and the server refuses to start. `velocity` needs no EULA.
 - `SERVER_PORT` only drives the healthcheck; the real port comes from each server's config.
 - `fabric` bundles OPanel **and** its mandatory Fabric API dependency, seeding both into
   `/data/mods` on first start; without fabric-api the loader refuses to boot
@@ -109,8 +109,9 @@ Notes:
 ## Bumping a server
 
 1. Edit the version and sha256 in `images.json` (fabric: the MC/loader/API/OPanel
-   versions — it carries no sha256).
-2. Open a PR. The workflow builds all five and pushes only on `main`, so a PR proves it builds.
+   versions — it carries no sha256). A changed `plugins` list means a new version
+   revision: `26.3-258` -> `26.3-258-p1`, because a version tag is never re-pushed.
+2. Open a PR. The workflow builds all four and pushes only on `main`, so a PR proves it builds.
 3. Merge, then point `configs/pins.env` at the new tag and deploy.
 
 Nothing resolves a moving tag, so a running fleet is unaffected until the pins change.

@@ -20,7 +20,7 @@ REGISTRY = "ghcr.io/jcpowermac/pumpkin-fleet"
 
 # node -> (image, podman --memory limit, JAVA_MEMORY env)
 WORKLOADS = {
-    "lobby": ("pumpkin", "4g", "2G"),
+    "lobby": ("papermc", "4g", "2G"),
     "plugins": ("papermc", "4g", "2G"),
     "vanilla": ("fabric", "3g", "2G"),
     "neoforge": ("neoforge", "6g", "4G"),
@@ -100,31 +100,11 @@ server.shell(
     commands=f"podman image exists {image} || podman pull {image}",
 )
 
-# OPanel is a native Pumpkin plugin (cdylib) that runs in-process inside the server.
-# It goes into the bind-mounted /data volume, not the image: 111 MB, and it is
-# version-locked to the pumpkin pin above (mismatch panics the server).
-# Written by a throwaway container because a host-side copy lands with the wrong
-# SELinux MCS categories and uid mapping, and the server then cannot read it.
-# label=disable + no :Z: relabelling a shared volume with :Z makes it private to
-# the throwaway container, which then locks the live server out of its own data.
-opanel = next(i for i in IMAGES if i["name"] == image_name).get("plugins", {}).get("opanel")
-# `bundled` means the image already carries it and its entrypoint seeds the volume
-# (fabric: OPanel + its Fabric API dependency), so there is nothing to fetch here.
-if opanel and not opanel.get("bundled"):
-    server.shell(
-        name=f"Install OPanel {opanel['version']} into the data volume",
-        commands=(
-            f"podman run --rm --security-opt label=disable --entrypoint sh -v {data_dir}:/data {image} "
-            f"-c 'sha256sum /data/plugins/libopanel_pumpkin.so 2>/dev/null' "
-            f"| grep -q {opanel['sha256']} && exit 0; "
-            f"curl -fsSL -o /tmp/opanel.so {opanel['url']} && "
-            f"echo '{opanel['sha256']}  /tmp/opanel.so' | sha256sum -c - >/dev/null && "
-            f"podman run --rm -i --security-opt label=disable --entrypoint sh --user 1000:1000 "
-            f"-v {data_dir}:/data {image} "
-            f"-c 'cat > /data/plugins/libopanel_pumpkin.so' < /tmp/opanel.so && "
-            "rm -f /tmp/opanel.so"
-        ),
-    )
+# Plugins ship inside the image now (CI bakes them from containers/images.json),
+# so there is nothing to fetch here. The only thing the deploy still needs to know
+# is whether this node's image carries OPanel, whose web panel serves on 3000.
+plugins = next(i for i in IMAGES if i["name"] == image_name).get("plugins", [])
+opanel = next((p for p in plugins if p["name"] == "opanel"), None)
 # Recreating the container wipes OPanel's in-memory session registry, so every
 # logged-in browser is 401'd (their JWT is still signed and unexpired, but no
 # longer "active"), which shows up as "Unable to connect to the server" plus
@@ -172,8 +152,10 @@ server.shell(
     commands="firewall-cmd --add-port=25565/tcp --permanent && firewall-cmd --reload",
     _sudo=True,
 )
-# OPanel listens on 3000 by default (host networking, so no mapping). Internal
-# only until Task 7 Step 5 puts authentik OIDC + the Traefik route in front of it.
+# OPanel listens on 3000 by default (host networking, so no mapping). It is a
+# plugin in the manifest, so the rule follows whichever image declares it — currently
+# fabric only. Internal until Task 7 Step 5 puts authentik OIDC + the Traefik route
+# in front of it.
 if opanel:
     server.shell(
         name="Allow 3000/tcp (OPanel) through firewalld",

@@ -28,7 +28,7 @@ Actions and pulled from ghcr.io — see `containers/README.md`.
 | Path | What |
 |---|---|
 | `configs/pins.env` | Every pinned value in the fleet (IPs, VMIDs, image tags, PVE host). Single source; scripts `source` it. |
-| `containers/` | `images.json` (server versions + sha256 pins) and one Dockerfile per image: `pumpkin`, `papermc`, `neoforge`, `velocity`. Built in CI. |
+| `containers/` | `images.json` (server versions + sha256 pins + the plugins each image carries) and one Dockerfile per image: `papermc`, `fabric`, `velocity`, `neoforge`. Built in CI. |
 | `.github/workflows/` | `containers.yml` — builds all four images and pushes versioned tags to ghcr.io. |
 | `templates/fleet.ign.butane` | Per-node Ignition (envsubst → butane → ignition). Sets hostname + static IP, rebases to uCore, reboots, then enables Cockpit + QGA. |
 | `scripts/fleet/` | Build the game nodes. `20-create-nodes.sh` is the real one. |
