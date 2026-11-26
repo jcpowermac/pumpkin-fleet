@@ -22,7 +22,7 @@ REGISTRY = "ghcr.io/jcpowermac/pumpkin-fleet"
 WORKLOADS = {
     "lobby": ("pumpkin", "4g", "2G"),
     "plugins": ("papermc", "4g", "2G"),
-    "vanilla": ("pumpkin", "4g", "2G"),
+    "vanilla": ("fabric", "3g", "2G"),
     "neoforge": ("neoforge", "6g", "4G"),
 }
 
@@ -36,6 +36,10 @@ data_dir = f"/srv/{node}/data"
 # the user lingers (logind tears down user@N and its container scopes).
 server.shell(name="Enable linger for the service user", commands="loginctl enable-linger core", _sudo=True)
 files.directory(path=data_dir, _sudo=True)
+# files.directory above creates it root-owned, and inside `podman unshare` uid 0 IS
+# `core`, so a namespace chown of a root-owned dir is EPERM. Hand the directory
+# itself to core first (not -R: the contents keep their container ownership).
+server.shell(name=f"Hand {data_dir} to the service user", commands=f"chown core:core {data_dir}", _sudo=True)
 # Container runs as uid/gid 1000. podman for `core` remaps uids (subuid range),
 # so chown inside podman's own namespace — chowning to host uid 1000 does not work.
 server.shell(name=f"Own {data_dir} by container uid 1000", commands=f"podman unshare chown -R 1000:1000 {data_dir}")
@@ -104,7 +108,9 @@ server.shell(
 # label=disable + no :Z: relabelling a shared volume with :Z makes it private to
 # the throwaway container, which then locks the live server out of its own data.
 opanel = next(i for i in IMAGES if i["name"] == image_name).get("plugins", {}).get("opanel")
-if opanel:
+# `bundled` means the image already carries it and its entrypoint seeds the volume
+# (fabric: OPanel + its Fabric API dependency), so there is nothing to fetch here.
+if opanel and not opanel.get("bundled"):
     server.shell(
         name=f"Install OPanel {opanel['version']} into the data volume",
         commands=(
@@ -125,8 +131,11 @@ if opanel:
 # "Unable to connect to the WebSocket of terminal". Upstream /api/auth/check is
 # broken (500) so the panel never bounces to login either. So only recreate when
 # the deployment inputs actually change; --restart=unless-stopped covers reboots.
+# EULA is the operator's acceptance of Mojang's terms; every image takes it and the
+# ones that need it (papermc/neoforge/fabric) exit without it.
+_env = f"--env EULA=true --env JAVA_MEMORY={java_mem}"
 _desired = hashlib.sha256(
-    f"{image} {mem} {java_mem} {opanel['sha256'] if opanel else ''}".encode()
+    f"{image} {mem} {_env} {(opanel or {}).get('sha256', '')}".encode()
 ).hexdigest()
 _pin_file = f"~/.fleet-{node}.pin"
 server.shell(
@@ -141,7 +150,7 @@ server.shell(
         f"--memory {mem} --stop-timeout 60 "
         f"--network=host "
         f"-v {data_dir}:/data:Z "
-        f"-e JAVA_MEMORY={java_mem} "
+        f"{_env} "
         f"{image} "
         f">/dev/null && echo {_desired} > {_pin_file}"
     ),

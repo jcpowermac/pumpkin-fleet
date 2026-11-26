@@ -50,6 +50,13 @@
       "FABRIC_API": "0.167.0+26.3",
       "OPANEL_VERSION": "2.2.11",
       "OPANEL_ASSET": "opanel-fabric-26.1-build-2.2.11.jar"
+    },
+    "plugins": {
+      "opanel": {
+        "version": "2.2.11",
+        "bundled": true,
+        "_note": "Baked into the image and seeded into /data/mods by the entrypoint. Unlike pumpkin's native cdylib this is a plain mod jar, so it is not version-locked to the server build; it does need fabric-api, which the image also bundles."
+      }
     }
   }
 ]

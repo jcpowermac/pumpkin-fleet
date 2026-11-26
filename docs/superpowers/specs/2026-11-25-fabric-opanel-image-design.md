@@ -2,8 +2,10 @@
 
 Date: 2026-11-25
 Status: draft for approval
-Scope: `containers/fabric/` + an `images.json` entry. **Image only** — no node,
-no deploy, no `tasks/gameserver.py` change (user decision 2026-11-25).
+Scope: `containers/fabric/` + an `images.json` entry. Originally image-only; on
+2026-11-25 the user asked for it provisioned too, so the `vanilla` node (203,
+`10.10.10.56`) now runs this image and `tasks/gameserver.py` grew the two fixes
+that deploy exposed (see "Left to the builder" → resolved below).
 
 ## Intent
 
