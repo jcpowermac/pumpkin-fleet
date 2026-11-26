@@ -119,7 +119,20 @@ if ((!RENDER_ONLY)); then
   unsafe=(); unproven=()
   for entry in "${NODES[@]}"; do
     IFS=: read -r vmid name ip <<<"$entry"
-    ssh "$PVE_HOST" qm status "$vmid" >/dev/null 2>&1 || continue
+    if ! status_out="$(ssh "$PVE_HOST" qm status "$vmid" 2>&1)"; then
+      # `qm status` fails with "does not exist" for a VM that is not there (nothing to lose).
+      # ssh itself fails, without that message, when pve3 did not answer (everything at risk).
+      # Reading the second as the first makes every node look VM-less and the loop then
+      # destroys a live VM whose world is still on scsi0.
+      grep -qi 'does not exist' <<<"$status_out" || {
+        echo "REFUSE: cannot tell whether VM $vmid (${name}) exists — pve3 answered with:" >&2
+        echo "        ${status_out:-<no output at all>}" >&2
+        order_hint
+        echo "        Nothing was stopped, detached or destroyed." >&2
+        exit 1
+      }
+      continue
+    fi
     config="$(ssh "$PVE_HOST" qm config "$vmid")" \
       || { echo "REFUSE: cannot read VM $vmid (${name}) — not destroying what I cannot inspect" >&2; exit 1; }
     scsi1="$(sed -n 's/^scsi1: //p' <<<"$config")"

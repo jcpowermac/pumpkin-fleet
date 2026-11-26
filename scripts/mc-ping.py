@@ -77,7 +77,9 @@ def main() -> None:
     _, i2 = rd_varint_from(body[i1:])   # string length
     try:
         status = json.loads(body[i1 + i2:])
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        # A server answering with bytes that are not valid UTF-8 fails *before* json can
+        # complain. That must read as "answered, untrustworthy", not "not answering".
         status = None
     if not isinstance(status, dict):
         # Not an object (a list, a string, or not JSON at all): the server answered, but

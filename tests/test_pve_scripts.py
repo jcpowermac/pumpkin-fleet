@@ -87,6 +87,10 @@ elif command[:2] == ["zfs", "create"]:
     datasets.append(name)
     save()
 elif command[:2] == ["qm", "status"]:
+    if state.get("host_unreachable"):
+        # ssh to a host that is not answering: exit 255, no pve output at all. Distinct from
+        # the not-exit case below, which is the only one that means "there is no VM here".
+        sys.exit(255)
     if command[2] not in vms:
         sys.stderr.write(f"Configuration file 'nodes/{command[2]}.conf' does not exist\\n")
         sys.exit(1)
@@ -837,6 +841,27 @@ def test_create_nodes_refuses_a_node_whose_world_is_not_proven_on_its_zvol(pve, 
             assert f"{vmid} ({node})" in err, err
     # The refusal says what it proved and what it could not, and names the way forward.
     assert "25-migrate-data.sh" in err and "FLEET_DATA_DEV" in err, err
+    log = pve.call_log()
+    assert "qm destroy" not in log and "qm stop" not in log and "qm create" not in log, log
+    assert "heredoc" not in log and "scp " not in log, log
+
+
+def test_create_nodes_refuses_when_pve3_does_not_answer_the_inspection(pve, tmp_path):
+    """`qm status ... || continue` read an unanswerable host as "this VM does not exist". A
+    transient pve3 ssh failure therefore made all four nodes look VM-less, the pre-flight
+    passed with nothing to protect, and the loop destroyed a live VM with its world on scsi0."""
+    state = pve.read_state()
+    for vmid, node in NODES:
+        state["vms"][vmid]["scsi1"] = f"/dev/zvol/pool/mcdata/{node}"
+    state["mounted"] = [node for _, node in NODES]   # even a fully migrated fleet is unsafe
+    state["host_unreachable"] = True                  # ssh exit 255, no pve output at all
+    pve.write_state(state)
+
+    result = create_nodes(pve, tmp_path)
+    assert result.returncode != 0, result.stdout
+    err = result.stderr
+    assert "REFUSE: cannot tell whether VM" in err, err
+    assert "Nothing was stopped, detached or destroyed." in err, err
     log = pve.call_log()
     assert "qm destroy" not in log and "qm stop" not in log and "qm create" not in log, log
     assert "heredoc" not in log and "scp " not in log, log

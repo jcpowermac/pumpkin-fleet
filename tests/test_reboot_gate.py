@@ -36,7 +36,7 @@ def varint(n: int) -> bytes:
             return out + bytes([b])
 
 
-def status_server(payload: dict):
+def status_server(payload, raw=None):
     """A one-shot server speaking the status protocol, so mc-ping.py is exercised for real."""
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
@@ -53,7 +53,7 @@ def status_server(payload: dict):
                 if not chunk:
                     return
                 seen += chunk
-            text = json.dumps(payload).encode()
+            text = raw if raw is not None else json.dumps(payload).encode()
             conn.sendall(varint(len(varint(0) + varint(len(text)) + text)) + varint(0) + varint(len(text)) + text)
 
     thread = threading.Thread(target=serve, daemon=True)
@@ -125,8 +125,8 @@ def test_an_empty_server_still_allows_the_reboot_through_mc_ping(capsys):
     assert "reboot allowed" in capsys.readouterr().out
 
 
-def ping_raw(payload) -> subprocess.CompletedProcess:
-    port, listener = status_server(payload)
+def ping_raw(payload, raw=None) -> subprocess.CompletedProcess:
+    port, listener = status_server(payload, raw)
     try:
         return subprocess.run(
             [sys.executable, "-I", str(MC_PING), "127.0.0.1", str(port)],
@@ -148,6 +148,15 @@ def test_a_payload_that_is_not_a_json_object_is_unparseable_not_unreachable(caps
     # ...and what the gate does with that exit code: it answered, so do not reboot.
     assert reboot_gate.should_reboot({}) is False
     assert "no player count" in capsys.readouterr().out
+
+
+def test_a_payload_that_is_not_valid_utf8_is_unparseable_not_unreachable():
+    """json decodes the payload bytes, so an invalid-UTF-8 answer raised UnicodeDecodeError
+    *before* json could call it malformed: exit 1, "not answering", reboot allowed. Same rule
+    as the non-object payload above — an answer that cannot be read never allows a reboot."""
+    out = ping_raw(None, raw=b'{"players": {"online": 4, "max": 20}}\xff')
+    assert out.returncode == reboot_gate.UNPARSEABLE, (out.returncode, out.stdout, out.stderr)
+    assert "unparseable" in out.stderr.lower(), out.stderr
 
 
 def test_an_unparseable_answer_never_reaches_the_reboot(monkeypatch, tmp_path, capsys):
