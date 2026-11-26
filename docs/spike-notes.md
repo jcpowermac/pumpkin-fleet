@@ -416,6 +416,23 @@ exists:
    bridge, but it still sees core's containers via that cgroup scan — root's own
    podman store holds only cockpit's `ws` container, which is why checking
    `sudo podman ps` disproves nothing.
+   **The scan runs once, in `componentDidMount`, and nothing re-runs it when the
+   session is later elevated** (cockpit-podman 132 only listens for
+   `locationchanged`). Elevating while the Podman page is open leaves it empty —
+   reload the page after acquiring Administrative access. The two silent outcomes
+   go to the *browser* console, not the server: `unprivileged session, skipping
+   detection of other users` vs `getInfo failed` (on any error the user is dropped
+   from the list with no UI message).
+
+   Verified on vanilla 2026-11-25, so the daemon side can be excluded in one shot
+   (as root, all should be 200):
+   ```sh
+   sudo find /sys/fs/cgroup \( -name 'libpod.*scope' -o -name 'podman-*.scope' \) \
+        -exec stat --format='%u %U' {} \;      # -> 1000 core
+   sudo curl -s -o /dev/null -w '%{http_code}\n' \
+        --unix-socket /run/user/1000/podman/podman.sock \
+        http://d/v5.0.0/libpod/containers/json?all=true
+   ```
 
 **Verifying a server is really up:** `scripts/mc-ping.py <ip> 25565` does a real
 protocol-777 status ping (varint framing; the server never acks the handshake — it
