@@ -62,4 +62,15 @@ present "$data/Extra.jar" "idempotent: a second converge touched a jar the fleet
 same "$work/expected-stamp" "$stamp" "idempotent: the stamp changed on a second converge"
 same "$bundled/ViaVersion.jar" "$data/ViaVersion.jar" "idempotent: a second converge replaced a jar it had just installed"
 
+# A plugins stage that produced nothing is not the same statement as "this fleet ships
+# nothing": retiring the stamped set would strip a live volume in one start, and the
+# emptied stamp would hide those names from the next good image.
+empty_bundled=$work/empty-bundled
+mkdir -p "$empty_bundled"
+( set -eu; seed_plugins "$empty_bundled" "$data" fleet-plugins )
+present "$data/LuckPerms.jar" "empty_bundle: an empty bundled dir retired a plugin the volume had"
+present "$data/ViaVersion.jar" "empty_bundle: an empty bundled dir retired a plugin this image ships"
+present "$data/Extra.jar" "empty_bundle: an empty bundled dir touched a jar the fleet never shipped"
+same "$work/expected-stamp" "$stamp" "empty_bundle: the stamp was rewritten empty, losing the record to restore from"
+
 echo "OK: seed_plugins converges a data dir onto the baked plugin set"

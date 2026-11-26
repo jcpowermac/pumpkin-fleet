@@ -172,6 +172,6 @@
         "deps": []
       }
     ],
-    "_note": "Every plugin here is baked by the image's plugins stage, sha256-gated, and lands in /opt/bundled-mods under install_as; the entrypoint then seeds them into /data/mods, where a jar the volume already holds is never replaced."
+    "_note": "Every plugin here is baked by the image's plugins stage, sha256-gated, and lands in /opt/bundled-mods under install_as; the entrypoint then installs or replaces them in /data/mods, because for a name this fleet ships the image is authoritative. Only a mod under a name the fleet does not ship is left alone."
   }
 ]

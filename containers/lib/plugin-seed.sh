@@ -24,6 +24,15 @@ seed_plugins() {
 
   mkdir -p "$data"
 
+  # An existing-but-empty bundled dir is a build that produced nothing, not a statement
+  # that this fleet ships nothing: retiring the stamped set on that reading would strip a
+  # live volume in one start, and the rewritten-empty stamp would then hide those names
+  # from the next good image. Leave the volume and the record alone.
+  set -- "$bundled"/*.jar
+  if [ ! -f "$1" ]; then
+    return 0
+  fi
+
   # A data jar with the same bytes as a bundled jar but an older name is the same
   # artifact under its upstream filename; the canonical copy lands below, so the
   # duplicate goes. Only *.jar files are touched — plugin data dirs live here too.

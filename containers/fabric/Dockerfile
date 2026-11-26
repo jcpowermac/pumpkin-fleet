@@ -43,7 +43,8 @@ RUN set -eu; \
     set -- ${PLUGIN_TRIPLETS}; \
     while [ "$#" -ge 3 ]; do \
       curl -fsSL "$1" -o "$2"; echo "$3  $2" | sha256sum -c; shift 3; \
-    done
+    done; \
+    [ "$#" -eq 0 ] || { echo "PLUGIN_TRIPLETS is not a list of triples" >&2; exit 1; }
 # shortcut: the arg is word-split, so no url or install_as may contain whitespace
 # (all four CDNs satisfy); upgrade to a TSV build arg if one ever needs it.
 

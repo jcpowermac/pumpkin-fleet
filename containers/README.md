@@ -48,7 +48,6 @@ Why one base, and why this one:
 2. **Every artifact is sha256-pinned** via `ADD --checksum`, where the publisher gives us
    one. A moved or tampered upstream asset fails the build instead of shipping. Paper and
    Velocity are self-verifying: their fill-data object id *is* the file's SHA-256. Plugin
-   jars from `images.json` go through a `plugins` build stage instead — `curl` then
    jars from `images.json` go through a `plugins` build stage instead: `curl`, then
    `sha256sum -c` against the manifest's pin. Only `neoforge` and `fabric` are looser —
    their installer resolves a whole dependency tree at build time, so those pin versions

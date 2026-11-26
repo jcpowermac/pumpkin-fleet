@@ -110,6 +110,16 @@ def test_plugin_declaring_images_bake_them():
             assert "PLUGIN_TRIPLETS" not in dockerfile, name
 
 
+def test_plugins_stage_rejects_a_ragged_triplet_list():
+    # The stage consumes `url install_as sha256` triples three at a time, so a hand-edited
+    # install_as or sha256 leaves a ragged tail the loop silently drops: the image then
+    # builds green with an empty plugin dir, which the seed reads as "ship nothing".
+    for name, image in IMAGES.items():
+        if image.get("plugins"):
+            dockerfile = (REPO / "containers" / name / "Dockerfile").read_text()
+            assert 'PLUGIN_TRIPLETS is not a list of triples' in dockerfile, name
+
+
 def test_papermc_plugin_set_is_exact():
     # ViaBackwards and ViaRewind are declared here rather than conjured by the resolver:
     # Hangar calls them optional dependencies of ViaVersion, which describes ViaVersion's
