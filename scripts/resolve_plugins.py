@@ -8,8 +8,9 @@ review as a bump PR.
 
   --check    resolve and report; exit 2 when a bump or an incompatibility needs a human
   --dry-run  print the PR body, write nothing
-  --bump     rewrite containers/images.json in place, moving an image's -pN only when its
-             plugin set actually changed
+  --bump     rewrite containers/images.json in place, moving an image's -pN when a plugin's
+             version, url or sha256 changed or the plugin set grew — a version tag is never
+             re-pushed with different bytes
   --only IMAGE   resolve one image
 
 sha256 is the reason this exists: `ADD --checksum` accepts sha256 only, Hangar publishes it,
@@ -297,9 +298,9 @@ def bump_revision(version: str) -> str:
 
 
 def plan(manifest: list[dict], only: str | None = None) -> tuple[list[dict], list[str], list[tuple[str, str, str]]]:
-    """Resolve the manifest in memory: fill the artifact fields, and move an image's -pN only
-    when a plugin version changed or the plugin set grew. Returns (changes, problems,
-    revised); nothing is written."""
+    """Resolve the manifest in memory: fill the artifact fields, and move an image's -pN when a
+    resolved plugin's artifact identity (version, url or sha256) moved or the plugin set grew.
+    Returns (changes, problems, revised); nothing is written."""
     changes: list[dict] = []
     problems: list[str] = []
     revised: list[tuple[str, str, str]] = []
@@ -317,8 +318,11 @@ def plan(manifest: list[dict], only: str | None = None) -> tuple[list[dict], lis
                             "old": old.get("version"), "new": entry.get("version"),
                             "url": entry.get("url"), "sha256": entry.get("sha256"),
                             "note": entry.get("note", "")})
-            # A first resolution fills empty fields; only a changed version is a new revision.
-            if old.get("version") and old["version"] != entry.get("version"):
+            # A first resolution only fills empty fields. After that, any move in artifact
+            # identity — version, url or sha256 — is a new revision, because an image tag is
+            # defined by the bytes it installs and is never re-pushed with different content.
+            if old.get("version") and (old.get("version"), old.get("url"), old.get("sha256")) != (
+                    entry.get("version"), entry.get("url"), entry.get("sha256")):
                 moved = True
         if moved or len(image["plugins"]) != len(before):
             old_version = image["version"]
@@ -330,7 +334,7 @@ def plan(manifest: list[dict], only: str | None = None) -> tuple[list[dict], lis
 def pr_body(changes: list[dict], problems: list[str], revised: list[tuple[str, str, str]]) -> str:
     lines = ["Resolve plugin versions, urls and sha256s in `containers/images.json`.", ""]
     for image, old_version, new_version in revised:
-        lines.append(f"- `{image}`: `{old_version}` -> `{new_version}` (plugin set changed)")
+        lines.append(f"- `{image}`: `{old_version}` -> `{new_version}` (plugin artifacts changed)")
     if revised:
         lines.append("")
     lines += ["| image | plugin | source | version | sha256 |", "|---|---|---|---|---|"]

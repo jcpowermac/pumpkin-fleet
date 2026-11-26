@@ -375,6 +375,29 @@ def test_only_restricts_the_resolution(monkeypatch, tmp_path):
     assert not any("luckperms" in url for url in asked), "--only must not resolve the other image"
 
 
+def test_a_reuploaded_asset_with_the_same_tag_bumps_the_revision(monkeypatch, tmp_path):
+    """GitHub lets a release asset be deleted and re-uploaded under the same tag, so
+    `tag_name`, `browser_download_url` and the resolved version are all identical while the bytes
+    differ. That is a new plugin revision: writing the new sha256 without moving -pN would have
+    Task 3 re-push an image tag that already exists, with different content."""
+    path = tmp_path / "images.json"
+    monkeypatch.setattr(rp, "MANIFEST", path)
+    release = _fixture("github_fabric.json")
+    monkeypatch.setattr(rp, "fetch_json", _fetch({"repos/FabricMC/fabric": release}))
+    monkeypatch.setattr(rp, "sha256_of_url", lambda url, dest: "b" * 64)  # the re-uploaded asset
+    committed = [{"name": "fabric", "version": "26.3-0.20.1-p1", "plugins": [
+        {"name": "fabric-api", "slug": "FabricMC/fabric", "source": "github", "mc": ["26.3"],
+         "install_as": "fabric-api.jar", "version": "0.167.0+26.3",
+         "url": release["assets"][0]["browser_download_url"], "sha256": "a" * 64, "deps": []}]}]
+    path.write_text(json.dumps(committed, indent=2) + "\n")
+    assert rp.main(["--bump"]) == 0
+    out = json.loads(path.read_text())
+    assert out[0]["plugins"][0]["version"] == "0.167.0+26.3", "upstream did not publish a new version"
+    assert out[0]["plugins"][0]["url"] == committed[0]["plugins"][0]["url"]
+    assert out[0]["plugins"][0]["sha256"] == "b" * 64
+    assert out[0]["version"] == "26.3-0.20.1-p2", "different bytes must mean a new plugin revision"
+
+
 def test_dry_run_body_names_plugin_version_sha_and_source(monkeypatch, tmp_path, capsys):
     path = _papermc_only(monkeypatch, tmp_path)
     before = json.dumps(_manifest_with_via("26.3-258-p1"), indent=2) + "\n"
