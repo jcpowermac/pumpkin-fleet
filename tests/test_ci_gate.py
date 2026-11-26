@@ -167,6 +167,22 @@ def test_a_reverted_plugin_revision_is_rejected():
     assert "promote" in errors[0].message and "-p" in errors[0].message
 
 
+def test_a_revert_that_drops_the_revision_entirely_is_rejected():
+    # A plain `git revert` of the commit that introduced plugins sends the entry back to
+    # 26.3-258 with plugins: [] — no page calls that a revert, because neither side parses as
+    # -pN. Building it re-pushes 26.3-258, the tag ghcr already serves (the pre-plugin build).
+    errors = _errors([_image(version="26.3-258-p2")], [_image(version="26.3-258", plugins=[])])
+    assert [e.image for e in errors] == ["papermc"]
+    assert "26.3-258-p3" in errors[0].message, "it must name the revision to re-land as"
+
+
+def test_a_server_upgrade_that_drops_the_revision_still_builds():
+    # 26.3-258-p2 -> 26.4-300 is a new server jar under a new series, so the bare tag is new.
+    head = [_image(version="26.4-300", plugins=[],
+                   args={"PAPER_VERSION": "26.4-300", "PAPER_SHA256": "c5df5fb9f6155e48380c67c6e2b2dc25"})]
+    assert _errors([_image(version="26.3-258-p2")], head) == []
+
+
 def test_a_same_series_no_op_is_not_a_reverted_revision():
     # An unchanged manifest (a re-run, an annotation-only edit) must stay clean: it builds nothing.
     assert _errors([_image(version="26.3-258-p2")], [_image(version="26.3-258-p2")]) == []

@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # containers/lib/plugin-seed.sh is the converge rule the image entrypoints run on
 # every start. The cases below are the ones deployed volumes depend on: canonical
-# names land, a hand-edited jar on the volume is never overwritten, an old-named
-# copy of a jar the fleet ships is not left beside the canonical one, and a jar the
-# image stopped bundling is removed only if the fleet put it there.
+# names land, the image's build of a name it ships replaces a stale one on the volume,
+# an old-named copy of a jar the fleet ships is not left beside the canonical one, a jar
+# the image stopped bundling is removed only if the fleet put it there, and any other
+# name on the volume is the operator's.
 
 set -u
 

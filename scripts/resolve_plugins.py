@@ -160,13 +160,15 @@ def _hangar_deps(p: Plugin, declared: list[dict]) -> list[dict]:
 
 
 def dep_install_as(dep: dict) -> str:
-    """The jar name a required dependency lands under."""
-    return f"{dep['name']}.jar"
+    """The jar name a required dependency lands under: its canonical project slug, because an
+    upstream display name may contain spaces and `install_as` has to stay one token."""
+    return f"{dep['slug']}.jar"
 
 
-def expand_hangar_deps(p: Plugin) -> list[Plugin]:
-    """p.deps as plugin seeds, ready to be declared. `p` must already be resolved."""
-    return [Plugin(name=dep["name"], slug=dep["slug"], source="hangar",
+def expand_deps(p: Plugin) -> list[Plugin]:
+    """p.deps as plugin seeds of the same source, ready to be declared. `p` must already be
+    resolved, so its `deps` is what upstream declared."""
+    return [Plugin(name=dep["name"], slug=dep["slug"], source=p.source,
                    install_as=dep_install_as(dep), mc=list(p.mc)) for dep in p.deps]
 
 
@@ -177,10 +179,13 @@ def resolve_modrinth(p: Plugin, mc: str, loader: str) -> Plugin:
         raise NoCandidate(f"{p.name} ({p.slug}): Modrinth lookup failed with HTTP {exc.code}") from exc
 
     family = LOADER_FAMILIES.get(loader, {loader})
-    matches = [v for v in versions if family & set(v["loaders"])]
+    # A beta or alpha is not a release: date order alone would let a pre-release for a new
+    # patch win. The Hangar path drops Snapshots for the same reason.
+    releases = [v for v in versions if v.get("version_type") == "release"]
+    matches = [v for v in releases if family & set(v["loaders"])]
     compatible = [v for v in matches if mc in v["game_versions"]]
     if not compatible:
-        newest = max(matches or versions, key=lambda v: v["date_published"], default=None)
+        newest = max(matches or releases, key=lambda v: v["date_published"], default=None)
         if newest is None:
             raise NoCandidate(f"{p.name} ({p.slug}): upstream has no releases")
         supported = max(newest["game_versions"], key=_version_key)
@@ -191,7 +196,28 @@ def resolve_modrinth(p: Plugin, mc: str, loader: str) -> Plugin:
     filing = next((f for f in top["files"] if f["primary"]), top["files"][0])
     with tempfile.TemporaryDirectory() as tmp:
         digest = sha256_of_url(filing["url"], Path(tmp) / filing["filename"])
-    return dataclasses.replace(p, version=top["version_number"], url=filing["url"], sha256=digest)
+    resolved = dataclasses.replace(p, version=top["version_number"], url=filing["url"],
+                                   sha256=digest)
+    resolved.deps = _modrinth_deps(p, top.get("dependencies") or [])
+    return resolved
+
+
+def _modrinth_deps(p: Plugin, declared: list[dict]) -> list[dict]:
+    """A Modrinth dependency names only a project id, so its slug and name come from the
+    project lookup — the same canonical-project rule as `_hangar_deps`."""
+    deps = []
+    for dependency in declared:
+        if not dependency.get("project_id"):
+            continue
+        try:
+            project = fetch_json(
+                f"https://api.modrinth.com/v2/project/{dependency['project_id']}")
+        except urllib.error.HTTPError as exc:
+            raise NoCandidate(f"{p.name}: Modrinth dependency {dependency['project_id']} "
+                              f"lookup failed with HTTP {exc.code}") from exc
+        deps.append({"slug": project["slug"], "name": project["title"],
+                     "required": dependency["dependency_type"] == "required"})
+    return sorted(deps, key=lambda dep: dep["slug"])
 
 
 def resolve_github(p: Plugin, loader: str) -> Plugin:
@@ -269,8 +295,10 @@ def resolve_manifest(manifest: list[dict], image: dict, problems: list[str] | No
     while index < len(pending):
         seed = pending[index]
         index += 1
+        # `stale`/`note` describe the run that wrote them, so a seed's copy never reaches a
+        # resolver: only `resolve_github` computes them, and the entry below re-adds what it says.
         plugin = Plugin(**{key: value for key, value in seed.items()
-                           if key in Plugin.__dataclass_fields__})
+                           if key in Plugin.__dataclass_fields__ and key not in ("stale", "note")})
         try:
             resolved = resolve_plugin(plugin, loader)
         except NoCandidate as exc:
@@ -292,7 +320,7 @@ def resolve_manifest(manifest: list[dict], image: dict, problems: list[str] | No
             entry["note"] = resolved.note
         out.append(entry)
 
-        for dep in (expand_hangar_deps(resolved) if resolved.source == "hangar" else []):
+        for dep in expand_deps(resolved):
             required = next((d["required"] for d in resolved.deps if d["slug"] == dep.slug), False)
             # Optional upstream dependencies are reported in `deps`, never installed.
             if required and dep.slug not in declared.values():
@@ -408,6 +436,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     manifest = json.loads(MANIFEST.read_text())
+    if args.only and args.only not in {image["name"] for image in manifest}:
+        parser.error(f"--only {args.only!r} is not an image in {MANIFEST.name}: "
+                     f"{', '.join(image['name'] for image in manifest)}")
     changes, problems, revised, stale = plan(manifest, args.only)
     print(pr_body(changes, problems, revised, stale), end="")
     if args.bump:

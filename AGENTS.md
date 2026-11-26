@@ -7,6 +7,10 @@ LXCs. Access: `ssh root@172.31.12.99` (key-based); `pct exec <vmid>` for LXCs,
 
 ## Read first
 
+- `docs/superpowers/specs/2026-11-26-fleet-plugin-gitops-design.md` — the current fleet design
+  (container images, `stable`/`stable-next` channels, the data zvol, the bump bot), with its plan
+  in `docs/superpowers/plans/2026-11-26-fleet-plugin-gitops.md`. Newer than `docs/plan.md` where
+  they disagree.
 - `docs/plan.md` — the deployment plan (checkbox-tracked, one task at a time).
 - `docs/spike-notes.md` — **everything learned the hard way**, organized as
   symptom-recognisable sections. Check it before fighting any infra problem.
@@ -25,13 +29,11 @@ on pve3 with a throwaway VMID. See the fleet design doc §2b.
 
 ## Scope note (2026-11-26): pumpkin is out
 
-**Pumpkin (the Rust server + PatchBukkit + the native OPanel cdylib) is no longer used
-in the fleet.** Still in the repo, now stale — do not build on it without asking:
-`containers/pumpkin/`, the `pumpkin` entry in `containers/images.json` (with its
-version-locked OPanel `.so` pin), and `tasks/gameserver.py` `WORKLOADS` mapping
-`lobby -> pumpkin` (so a deployed lobby is currently running the pumpkin image; what
-replaces it is undecided). The `containers/README.md` "glibc is forced by pumpkin"
-argument is also stale in that form — glibc is still required, but by `neoforge`.
+**Pumpkin (the Rust server + PatchBukkit + the native OPanel cdylib) is no longer used in
+the fleet and is no longer in the tree.** `containers/images.json` holds the four server
+images (`papermc`, `fabric`, `velocity`, `neoforge`) and `tasks/gameserver.py` `WORKLOADS`
+maps `lobby -> papermc`. glibc is still required, but by `neoforge` (see
+`containers/README.md`).
 
 ## Gotchas that have already cost time
 

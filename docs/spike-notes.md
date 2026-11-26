@@ -181,15 +181,15 @@ runs again on every boot. After the first run the rebase is a no-op and the rebo
 **Fix:** guard at the top of the post-rebase branch:
 
 ```sh
-if rpm-ostree status --booted 2>/dev/null | grep -q 'ghcr.io/jcpowermac/pumpkin-os'; then
+if rpm-ostree status --booted 2>/dev/null | grep -q "${UCORE_IMAGE}"; then
   systemctl enable --now cockpit.service qemu-guest-agent.service 2>/dev/null || true
   exit 0
 fi
 ```
 
-The image name must come from `${UCORE_IMAGE}`, not be hardcoded: a node already booted on
-`pumpkin-os` that greps for `ublue-os/ucore` never matches, rebases to the same ref and
-reboots forever (templates/fleet.ign.butane:79 is the guarded form; §14 records the fix).
+The image name must come from `${UCORE_IMAGE}`, not be hardcoded: a node already booted on the
+fleet image that greps for `ublue-os/ucore` never matches, rebases to the same ref and reboots
+forever (§14 records the loop; `templates/fleet.ign.butane:79` is the guarded form).
 
 ---
 
@@ -286,8 +286,9 @@ it (image + Ignition + import per machine) and each step is boring and repeatabl
 
 Built by `.github/workflows/os.yml` from `recipes/fleet.yml`, following
 `github.com/jcpowermac/os`. Published as **`ghcr.io/jcpowermac/pumpkin-os`**
-(tags: `latest`, `45`, `<sha>-45`, `<date>-45`), public — anonymous pull, no
-credentials on the nodes.
+(tags: `latest`, `stable`, `45`, `<sha>-45`, `<date>-45`), public — anonymous pull, no
+credentials on the nodes. BlueBuild writes everything but `stable`; `promote-os` is the only
+thing that moves `stable`, which is the tag the production nodes follow.
 
 **Why an image instead of `rpm-ostree install sssd`:** layering is per-node drift.
 One recipe is answerable from git.
@@ -339,9 +340,13 @@ and a permission failure is not evidence of absence.**
 
 ```sh
 sudo rpm-ostree rebase --bypass-driver \
-  ostree-unverified-registry:ghcr.io/jcpowermac/pumpkin-os:latest
+  ostree-unverified-registry:ghcr.io/jcpowermac/pumpkin-os:stable
 sudo systemctl reboot
 ```
+
+`:stable` is the tag the production nodes follow (`OS_TAG` in `configs/pins.env`); `:latest` is
+the canary's channel (`OS_TAG_CANARY`, node 202 only) and a hand-rebase onto it puts a production
+node on the daily unreviewed build.
 
 **`rpm-ostree` no-ops when the ref string is unchanged** (`error: Old and new refs are
 equal`). To pick up a new build of the same tag, rebase by digest:

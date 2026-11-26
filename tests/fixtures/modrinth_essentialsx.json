@@ -3,6 +3,7 @@
     "id": "nY6VN1XH",
     "name": "2.22.0 - The Tiny Copper Mayhem Update",
     "version_number": "2.22.0",
+    "version_type": "release",
     "loaders": [
       "bukkit",
       "paper",
@@ -43,6 +44,7 @@
     "id": "Oa9ZDzZq",
     "name": "2.21.2 - The Chase the Skies Update",
     "version_number": "2.21.2",
+    "version_type": "release",
     "loaders": [
       "bukkit",
       "paper",
@@ -82,6 +84,7 @@
     "id": "V4qyvs91",
     "name": "2.21.1 - The Spring to Life Update",
     "version_number": "2.21.1",
+    "version_type": "release",
     "loaders": [
       "bukkit",
       "paper",
@@ -121,6 +124,7 @@
     "id": "SKQwLLoQ",
     "name": "2.21.0 - The Adventure Awakening Update",
     "version_number": "2.21.0",
+    "version_type": "release",
     "loaders": [
       "bukkit",
       "paper",
@@ -160,6 +164,7 @@
     "id": "puUfqBpY",
     "name": "2.20.1 - The Trails and Tales Update",
     "version_number": "2.20.1",
+    "version_type": "release",
     "loaders": [
       "bukkit",
       "paper",
@@ -197,6 +202,7 @@
     "id": "pdY49V5Y",
     "name": "2.20.0 - The Better Together Update",
     "version_number": "2.20.0",
+    "version_type": "release",
     "loaders": [
       "bukkit",
       "paper",
@@ -233,6 +239,7 @@
     "id": "z951OvHM",
     "name": "2.19.7 - The (Even Less) Wild Update",
     "version_number": "2.19.7",
+    "version_type": "release",
     "loaders": [
       "bukkit",
       "paper",
@@ -269,6 +276,7 @@
     "id": "1RQ0Dtsz",
     "name": "2.19.6 - The (Not Too) Wild Update",
     "version_number": "2.19.6",
+    "version_type": "release",
     "loaders": [
       "bukkit",
       "paper",

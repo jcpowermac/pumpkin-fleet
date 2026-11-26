@@ -367,6 +367,12 @@ Uncomment all four hosts; `just up` green.
 
 ### Task 7: Game workloads + OPanel + identity on the 4 VMs
 
+> **SUPERSEDED 2026-11-26 — do not follow the Pumpkin/bind-mount steps below.** Pumpkin is out
+> of the fleet; each node runs a container image under a quadlet unit (`tasks/gameserver.py`,
+> `scripts/render_quadlet.py`) with its data on the host-owned `scsi1` zvol (spec §2b, §8). The
+> sssd/identity half still applies. Current design and plan:
+> `docs/superpowers/specs/2026-11-26-fleet-plugin-gitops-design.md` and its plan.
+
 **Files:**
 - Create (repo): `tasks/gameserver.py` (workload install), `configs/<server>/` per-server pins (Pumpkin version + OPanel version, NeoForge version + mod list + connector version), `configs/` sssd + LDAPS config template
 

@@ -10,7 +10,7 @@ anything.
 
 | image | version | artifact | why |
 |---|---|---|---|
-| `papermc` | `26.3-258-p1` | `paper-26.3-258.jar` | Bukkit/Paper plugin API |
+| `papermc` | `26.3-258-p2` | `paper-26.3-258.jar` | Bukkit/Paper plugin API |
 | `neoforge` | `26.3.0.115` | installer, resolved at build | modded server |
 | `velocity` | `4.3.1-45` | `velocity-4.3.1-45.jar` | proxy; Velocity 4 requires Java 25 |
 | `fabric` | `26.3-0.20.1-p1` | installer-resolved | Fabric server + OPanel; loader, libraries and Mojang jar are generated at build |
@@ -52,8 +52,10 @@ Why one base, and why this one:
    `sha256sum -c` against the manifest's pin. Only `neoforge` and `fabric` are looser —
    their installer resolves a whole dependency tree at build time, so those pin versions
    only and a rebuild picks up whatever upstream currently serves for that version.
-3. **No `latest` tag.** Every image is tagged with an exact version so a deploy can never
-   change under a running server.
+3. **No `latest` tag, and exactly two moving ones.** Every image is tagged with an exact
+   version — that is what gets audited. `stable-next` (the canary node) and `stable` (the
+   fleet) are the only moving tags; both are retagged onto a digest CI already published,
+   never rebuilt, and a deploy tracks `stable` and converges on its podman timer.
 4. **Runs as uid/gid 1000**, non-root, so the bind-mounted dataset is the only thing it
    can write.
 5. **The image owns the plugin names it ships.** `lib/plugin-seed.sh` installs the image's
@@ -84,30 +86,39 @@ velocity `512M`–`1G`). Extra flags go in `JAVA_OPTS`.
 
 ## Running one
 
+The fleet runs every image as a **quadlet unit** (`tasks/gameserver.py` writes it from
+`scripts/render_quadlet.py`), one per node, under `core`'s user units: `Network=host`,
+`AutoUpdate=registry`, the data volume at `/srv/<node>/data`. Start it with
+`systemctl --user start <node>.service`; a quadlet unit is generator-owned and transient, so it
+is never `enable`d — boot starts come from the unit's own `[Install]` section.
+
+The `podman run` below is for debugging an image by hand, not the fleet path. It blocks the
+unit's `ContainerName`, so stop the unit first and remove the container afterwards.
+
 ```sh
-podman run -d --name lobby --init \
-  --memory 4g --stop-timeout 60 \
-  -p 10.10.10.54:25565:25565 \
-  -v /srv/lobby/data:/data:Z \
-  -e JAVA_MEMORY=2G \
-  ghcr.io/<owner>/pumpkin-fleet/papermc:26.3-258-p1
+podman run -d --name papermc-manual --init \
+  --network host --memory 4g --stop-timeout 60 \
+  -v /srv/<node>/data:/data:Z \
+  -e EULA=true -e JAVA_MEMORY=2G \
+  ghcr.io/<owner>/pumpkin-fleet/papermc:26.3-258-p2
 ```
 
 Notes:
 
+- `--network host` is not optional: a rootless published port does not work on these nodes
+  (spike-notes §16), so the server binds its own port on the host.
 - `--init` is what reaps the server's child processes: the images have no `tini` (UBI has
   no such package).
 - `--stop-timeout 60` gives the server time to save and shut down cleanly on `SIGTERM`.
 - `EULA=true` is required for `papermc`, `neoforge` and `fabric`; without it the container
   has no `eula.txt` and the server refuses to start. `velocity` needs no EULA.
 - `SERVER_PORT` only drives the healthcheck; the real port comes from each server's config.
-- `fabric` bundles OPanel **and** its mandatory Fabric API dependency, seeding both into
-  `/data/mods` on first start; without fabric-api the loader refuses to boot
-  (`Mod 'OPanel' requires any version of fabric-api`). OPanel serves its panel on **3000**
-  (host networking, no mapping) and its config is `/data/config/opanel.json`. Its first-run
-  access key is written to `/opt/fabric/opanel/INITIAL_ACCESS_KEY.txt` — inside the
-  container, not the volume — so read it with `podman exec <name> cat ...` before
-  recreating the container, which regenerates it.
+- `fabric` bundles OPanel, Fabric API and LuckPerms, seeding all three into `/data/mods` at
+  every start (a stale build of a bundled name is replaced); without fabric-api the loader
+  refuses to boot (`Mod 'OPanel' requires any version of fabric-api`). OPanel serves its
+  panel on **3000** (host networking, no mapping) and its config is `/data/config/opanel.json`.
+  Its first-run access key is written under that config directory on the volume —
+  `podman exec <name> cat /data/config/INITIAL_ACCESS_KEY.txt` — not into the image.
 - `velocity` listens on `24587` by design (see `velocity.toml`), not the upstream default.
 
 ## Bumping a server
@@ -127,12 +138,16 @@ Notes:
 4. **Rollback is promote-only.** Dispatch again with the older version tag's digest and
    `stable` moves to bytes CI actually published. Never roll back by merging a revert of
    `images.json`: the gate rejects a plugin revision that goes backwards within the same
-   server series, because the merge would rebuild `26.3-258-p1` and re-push that tag with a
+   server series, because the merge would rebuild `26.3-258-p2` and re-push that tag with a
    new digest — mutating the tag the rollback pointed `stable` at. Reverted content you
    want shipped lands as a new `-pN`.
-5. `workflow_dispatch` with only an `image` forces that image into the matrix even when its
-   entry did not change — how a channel gets seeded for an image whose entry never changes,
-   and how a Dockerfile-only fix gets built. It re-publishes that image's version tag with a
-   new digest, so it is a deliberate lever rather than the everyday path.
+5. **Seeding a channel costs no build.** An image whose entry never changes (`velocity`,
+   `neoforge`) gets its `stable` by dispatching `image` + the digest of its published version
+   tag: `promote.sh` accepts a digest matching any published tag, so this is a retag, not a
+   rebuild. `workflow_dispatch` with only an `image` and no digest is the other lever — it
+   forces that image into the matrix even when its entry did not change, for a Dockerfile-only
+   fix — and it *does* re-publish the version tag with a new digest. That is why it is a
+   deliberate human decision and not the seeding path.
 
-Nothing resolves a moving tag, so a running fleet is unaffected until the pins change.
+A deploy tracks `stable`, so a promote reaches the running fleet on its next podman timer
+tick; nothing else about a running server changes until the tag moves.

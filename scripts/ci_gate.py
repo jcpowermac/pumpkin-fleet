@@ -117,10 +117,19 @@ def gate(base: list[dict], head: list[dict]) -> list[GateError]:
                 f"and that tag is already published — it has to become {bump_revision(version)}",
             ))
 
-        # Same server series, revision not moving forward: that revision is already published.
+        # Same server series, revision dropped or not moving forward: that revision is already
+        # published. Dropping the suffix entirely (`26.3-258-p2` -> `26.3-258`) is the plain
+        # revert of the commit that introduced plugins, and the bare series tag is the one ghcr
+        # served before it — the same breach as going back to `-p1`. `not plugins`: with plugins
+        # still declared, the rule above already names that breach.
         head_rev, base_rev = REVISION.match(version), REVISION.match(previous_version)
-        if (head_rev and base_rev and head_rev["series"] == base_rev["series"]
-                and version != previous_version and int(head_rev["n"]) < int(base_rev["n"])):
+        dropped = bool(base_rev and head_rev is None and not plugins
+                       and version == base_rev["series"])
+        reverted = bool(
+            head_rev and base_rev and head_rev["series"] == base_rev["series"]
+            and int(head_rev["n"]) < int(base_rev["n"])
+        )
+        if version != previous_version and (dropped or reverted):
             errors.append(GateError(
                 name,
                 f"{name}:{version} reverts to an already-published revision of "

@@ -109,7 +109,7 @@ def test_hangar_reports_no_compatible_build(monkeypatch):
 def test_hangar_dependency_closure(monkeypatch):
     monkeypatch.setattr(rp, "fetch_json", _hangar_fetch())
     p = rp.resolve_hangar(_via_seed(), "26.3")
-    deps = rp.expand_hangar_deps(p)
+    deps = rp.expand_deps(p)
     assert {d.slug for d in deps} == {"viabackwards", "viarewind"}
     assert all(d.source == "hangar" and d.mc == ["26.3"] for d in deps)
     # Hangar marks ViaVersion's deps optional; reported in `deps`, never installed.
@@ -170,21 +170,21 @@ def test_required_dependency_becomes_a_manifest_entry(monkeypatch):
     seed = {"name": "Foo", "slug": "foo", "source": "hangar", "mc": ["26.3"], "install_as": "Foo.jar"}
     image = {"name": "papermc", "version": "26.3-258-p1", "plugins": [dict(seed)]}
     plugins = rp.resolve_manifest([image], image)
-    assert [q["install_as"] for q in plugins] == ["Foo.jar", "ViaBackwards.jar"]
+    assert [q["install_as"] for q in plugins] == ["Foo.jar", "viabackwards.jar"]
     dep = plugins[1]
     assert (dep["slug"], dep["source"], dep["version"], dep["mc"]) == ("viabackwards", "hangar", "1.0", ["26.3"])
     # A second required dep already declared is not added twice, and the closure terminates.
     again = rp.resolve_manifest([image], image)
-    assert [q["install_as"] for q in again] == ["Foo.jar", "ViaBackwards.jar"]
+    assert [q["install_as"] for q in again] == ["Foo.jar", "viabackwards.jar"]
 
 
 def test_a_declared_dependency_is_never_added_again(monkeypatch):
-    """The fleet declares ViaBackwards by hand (containers/images.json), and Hangar reports
-    ViaVersion as a *required* dependency of ViaBackwards: the closure must not re-add a plugin
-    the manifest already names."""
+    """The fleet declares ViaBackwards by hand (containers/images.json), and Hangar reports it as
+    a *required* dependency of one of the manifest's own plugins: the closure must not re-add a
+    plugin the manifest already names."""
     monkeypatch.setattr(rp, "fetch_json", _fetch({
         "projects/viaversion/versions": _fixture("hangar_viaversion.json"),
-        "projects/viabackwards/versions": _synthetic_hangar(False),
+        "projects/viabackwards/versions": _synthetic_hangar(True),
         "projects/12": _fixture("hangar_dep_projects.json")["12"],
         "projects/112": _fixture("hangar_dep_projects.json")["112"],
     }))
@@ -220,6 +220,102 @@ def test_modrinth_filters_by_loader_and_game_version(monkeypatch):
     fabric = rp.resolve_modrinth(seed, "26.3", "fabric")
     assert fabric.version == "v5.5.85-fabric"
     assert fabric.url.endswith("/LuckPerms-Fabric-5.5.85.jar")
+
+
+def _synthetic_modrinth():
+    """One plugin, two uploads: a newer beta and an older release. The release is the one a
+    fleet installs and it requires another Modrinth project by id."""
+    return [
+        {"name": "Foo 2.0.0-beta.1", "version_number": "2.0.0-beta.1", "version_type": "beta",
+         "loaders": ["fabric"], "game_versions": ["26.3"],
+         "date_published": "2026-11-20T00:00:00Z", "dependencies": [],
+         "files": [{"primary": True, "filename": "foo-2.0.0-beta.1.jar",
+                    "url": "https://cdn.modrinth.com/data/foo/versions/beta/foo.jar"}]},
+        {"name": "Foo 1.4.0", "version_number": "1.4.0", "version_type": "release",
+         "loaders": ["fabric"], "game_versions": ["26.3"],
+         "date_published": "2026-11-01T00:00:00Z",
+         "dependencies": [
+             {"version_id": None, "project_id": "P7dR8mSH", "file_name": None,
+              "dependency_type": "required"},
+             {"version_id": None, "project_id": "oPt10NaL", "file_name": None,
+              "dependency_type": "optional"},
+         ],
+         "files": [{"primary": True, "filename": "foo-1.4.0.jar",
+                    "url": "https://cdn.modrinth.com/data/foo/versions/1.4.0/foo-1.4.0.jar"}]},
+    ]
+
+
+def _modrinth_fetch():
+    return _fetch({
+        "project/foo/version": _synthetic_modrinth(),
+        "project/P7dR8mSH": {"slug": "fabric-api", "title": "Fabric API"},
+        "project/oPt10NaL": {"slug": "optional-thing", "title": "Optional Thing"},
+        "project/fabric-api/version": [
+            {"name": "Fabric API 0.167.0", "version_number": "0.167.0", "version_type": "release",
+             "loaders": ["fabric"], "game_versions": ["26.3"],
+             "date_published": "2026-10-01T00:00:00Z", "dependencies": [],
+             "files": [{"primary": True, "filename": "fabric-api-0.167.0.jar",
+                        "url": "https://cdn.modrinth.com/data/P7dR8mSH/versions/0.167.0/fabric-api.jar"}]},
+        ],
+    })
+
+
+def test_modrinth_never_pins_a_beta_or_alpha(monkeypatch):
+    """Modrinth publishes betas for a new patch before the release build; date order alone
+    would pin one. The Hangar path drops Snapshots for the same reason, so this asymmetry was
+    the intent all along."""
+    monkeypatch.setattr(rp, "fetch_json", _modrinth_fetch())
+    monkeypatch.setattr(rp, "sha256_of_url", lambda url, dest: "a" * 64)
+    seed = rp.Plugin(name="Foo", slug="foo", source="modrinth", install_as="Foo.jar", mc=["26.3"])
+    p = rp.resolve_modrinth(seed, "26.3", "fabric")
+    assert p.version == "1.4.0", "the beta is newer but is not a release"
+    assert "/1.4.0/" in p.url
+
+
+def test_modrinth_dependency_closure(monkeypatch):
+    """Spec §6 step 3: Modrinth `dependencies[].project_id` joins the closure like Hangar's
+    `pluginDependencies[].projectId`. Required deps become entries; optional ones are recorded
+    and not installed."""
+    monkeypatch.setattr(rp, "fetch_json", _modrinth_fetch())
+    monkeypatch.setattr(rp, "sha256_of_url", lambda url, dest: "a" * 64)
+    seed = {"name": "Foo", "slug": "foo", "source": "modrinth", "mc": ["26.3"],
+            "install_as": "Foo.jar"}
+    image = {"name": "fabric", "version": "26.3-0.20.1-p1", "plugins": [dict(seed)]}
+    plugins = rp.resolve_manifest([image], image)
+    assert plugins[0]["deps"] == [
+        {"slug": "fabric-api", "name": "Fabric API", "required": True},
+        {"slug": "optional-thing", "name": "Optional Thing", "required": False},
+    ]
+    assert [q["install_as"] for q in plugins] == ["Foo.jar", "fabric-api.jar"]
+    assert plugins[1]["slug"] == "fabric-api" and plugins[1]["source"] == "modrinth"
+    assert plugins[1]["version"] == "0.167.0"
+
+
+def test_a_non_github_pin_that_resolves_drops_its_stale_flag(monkeypatch, tmp_path, capsys):
+    """`stale`/`note` are a statement about one run. A hangar or modrinth seed left flagged by
+    an earlier week must lose both as soon as it resolves; only the github path computes them."""
+    path = _papermc_only(monkeypatch, tmp_path)
+    seed = {"name": "ViaVersion", "slug": "viaversion", "source": "hangar", "mc": ["26.3"],
+            "install_as": "ViaVersion.jar", "stale": True,
+            "note": "upstream has no 26.3 build this week"}
+    path.write_text(json.dumps([{"name": "papermc", "version": "26.3-258-p1",
+                                 "plugins": [dict(seed)]}], indent=2) + "\n")
+    assert rp.main(["--dry-run"]) == 2
+    assert "Staleness" not in capsys.readouterr().out
+    assert rp.main(["--bump"]) == 0
+    entry = json.loads(path.read_text())[0]["plugins"][0]
+    assert "stale" not in entry and "note" not in entry
+
+
+def test_only_rejects_an_image_that_is_not_in_the_manifest(monkeypatch, tmp_path):
+    """A typo'd `--only paper` must not read as "the pins are current": exit 0 there is
+    indistinguishable from a clean resolve."""
+    path = tmp_path / "images.json"
+    monkeypatch.setattr(rp, "MANIFEST", path)
+    path.write_text(json.dumps(_manifest_with_via("26.3-258-p1"), indent=2) + "\n")
+    with pytest.raises(SystemExit) as exc:
+        rp.main(["--check", "--only", "paper"])
+    assert exc.value.code != 0
 
 
 def test_modrinth_computes_sha256_by_download(monkeypatch):

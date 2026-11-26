@@ -31,10 +31,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # uv syncs pytest and pyinfra from uv.lock, so there is no second dependency list to drift.
+      - uses: astral-sh/setup-uv@v6
+
       # --dry-run exits 2 when a plugin is actionable, and --bump exits 2 when a plugin could not
-      # be resolved at all: both are normal here, anything above 2 is a crash. `set +e` because a
-      # run step is `bash -e` by default, which would kill the step on that 2 before the exit code
-      # is read. The body is written before the bump, so it describes the change rather than the
+      # be resolved at all: both are normal here. 1 is not — that is what an uncaught exception
+      # returns, and it used to read as "nothing to bump" on a green run. `set +e` because a run
+      # step is `bash -e` by default, which would kill the step on that 2 before the exit code is
+      # read. The body is written before the bump, so it describes the change rather than the
       # already-bumped manifest.
       #
       # The gate is run here because a PR opened with the repository GITHUB_TOKEN triggers no
@@ -46,9 +50,9 @@ jobs:
           set +e
           git show HEAD:containers/images.json > "$RUNNER_TEMP/base.json"
           uv run python scripts/resolve_plugins.py --dry-run > "$RUNNER_TEMP/pr-body.md"
-          [ $? -le 2 ] || exit 1
+          rc=$?; case "$rc" in 0|2) ;; *) exit 1 ;; esac
           uv run python scripts/resolve_plugins.py --bump
-          [ $? -le 2 ] || exit 1
+          rc=$?; case "$rc" in 0|2) ;; *) exit 1 ;; esac
           set -e
           uv run python scripts/ci_gate.py --base "$RUNNER_TEMP/base.json" --head containers/images.json
 

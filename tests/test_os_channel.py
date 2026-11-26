@@ -40,6 +40,15 @@ def test_it_accepts_any_published_digest_ruling_6a():
         assert narrowing not in job, f"{narrowing} narrows the accepted digests to one tag"
 
 
+def test_a_promote_dispatch_cannot_cancel_a_build_mid_push():
+    """The concurrency group is what serialises a promote against the scheduled build; cancelling
+    the run in progress would kill whichever of the two started first, mid-push."""
+    text = WORKFLOW.read_text()
+    concurrency = text[text.index("concurrency:"):text.index("jobs:")]
+    assert "cancel-in-progress: false" in concurrency
+    assert "group: ${{ github.workflow }}" in concurrency, "overlapping runs must still serialise"
+
+
 def test_it_moves_the_tag_pins_env_names_not_a_hardcoded_stable():
     """promote.sh retags whatever TARGET_TAG says, and the nodes follow OS_TAG: passing the pins
     value is what stops the promoted tag and the followed tag from drifting apart."""

@@ -57,6 +57,24 @@ def test_it_runs_the_gate_itself_because_no_check_will_run_on_its_pr():
     assert gate < text.index("gh pr create"), "a rejected bump must fail the run, not open a PR"
 
 
+def test_a_resolver_crash_fails_the_run_instead_of_reading_as_nothing_to_bump():
+    """The resolver's own exit codes are 0 and 2. An uncaught exception exits 1, which
+    `[ $? -le 2 ]` accepted: a crash then wrote an empty body, left the manifest untouched and
+    reported "Nothing to bump: every pin already resolves" on a green run. Only 0 and 2 are
+    normal here."""
+    text = _text()
+    assert "-le 2" not in text, "-le 2 accepts exit 1, which is what a crash returns"
+    assert text.count("rc=$?") == 2, "both resolver calls must check the code they got"
+    assert text.count("case \"$rc\" in 0|2) ;; *) exit 1 ;; esac") == 2
+
+
+def test_uv_is_installed_before_it_is_used():
+    """`uv run` with no setup step is an assumption about the runner image, not a pin."""
+    text = _text()
+    assert "astral-sh/setup-uv@" in text
+    assert text.index("astral-sh/setup-uv@") < text.index("uv run")
+
+
 def test_the_duplicate_guard_runs_before_anything_is_pushed():
     text = _text()
     assert text.index("gh pr list") < text.index("git push")

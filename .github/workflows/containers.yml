@@ -1,13 +1,13 @@
 name: containers
 
 # Builds the four server images on GitHub's runners and pushes them to ghcr.io.
-# The uCore VMs never need a build toolchain or a source checkout — they pull
-# ghcr.io/<owner>/<repo>/<image>:<version> and nothing else.
+# The game VMs never need a build toolchain or a source checkout — they pull
+# ghcr.io/<owner>/<repo>/<image>:<channel> and nothing else.
 #
 # Versions and sha256 pins live in containers/images.json (single source of truth),
 # which this workflow reads to build the matrix. To bump a server: edit that file,
-# open a PR, merge. The version tag changes with it, so the deploy is a one-line
-# change in configs/pins.env.
+# open a PR, merge, then promote. A deploy follows <image>:stable, so nothing else
+# needs editing.
 #
 # Two rules shape the jobs below:
 #   * scripts/ci_gate.py rejects any change that would publish different bytes under a
@@ -17,14 +17,16 @@ name: containers
 #     follows stable-next; a human then dispatches with that digest, and scripts/promote.sh
 #     moves <image>:stable to it. stable/stable-next are the only moving tags.
 #
-# workflow_dispatch is the human lever, and the two inputs are read separately:
+# workflow_dispatch is the human lever, and the digest input decides which job runs:
 #   * image only  -> force that image into the matrix even though its entry did not change.
-#     This is what seeds a channel for an image whose entry never changes (velocity,
-#     neoforge) and what rebuilds after a Dockerfile-only fix. It does re-publish that
-#     image's version tag with a new digest: that is the point, and it is a human decision.
-#   * image + digest -> promote. The digest must match one of the image's published tags, so
-#     naming an older version tag's digest is the rollback the design needs — and rollback is
-#     promote-only: a merged revert would re-publish that revision, so ci_gate rejects it.
+#     This is what rebuilds after a Dockerfile-only fix. It does re-publish that image's
+#     version tag with a new digest: that is the point, and it is a human decision.
+#   * image + digest -> promote only, no build. The digest must match one of the image's
+#     published tags, so naming an older version tag's digest is the rollback the design needs
+#     — and rollback is promote-only: a merged revert would re-publish that revision, so ci_gate
+#     rejects it. Naming the version tag's own digest seeds a channel for an image whose entry
+#     never changes (velocity, neoforge) without rebuilding anything.
+#   * digest only -> no build either, and promote.sh refuses the empty image name.
 
 on:
   push:
@@ -52,6 +54,28 @@ permissions:
   packages: write
 
 jobs:
+  # The repo's only test net: the pytest suite plus the shell suites for the seed, promote and
+  # render code. Nothing else runs them, and the build job below is what publishes tags.
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # uv syncs pytest from uv.lock, so there is no second dependency list to drift.
+      - uses: astral-sh/setup-uv@v6
+
+      - name: pytest
+        run: uv run pytest -q
+
+      # The seed and promote suites stub curl and podman, so none of this reaches ghcr.io. The
+      # render suite needs `butane`, which this runner does not have: it self-skips (exit 0)
+      # instead of downloading a binary the repo does not otherwise depend on.
+      - name: Shell suites
+        run: |
+          bash tests/test_plugin_seed.sh
+          bash tests/test_promote.sh
+          bash tests/test_create_nodes_render.sh
+
   matrix:
     runs-on: ubuntu-latest
     outputs:
@@ -63,6 +87,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v6
 
       - id: gate
         env:
@@ -80,10 +106,11 @@ jobs:
         run: echo "prefix=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
   build:
-    needs: matrix
-    # A dispatch with no image input is a promote run: rebuilding here would re-push tags
-    # the merge already published.
-    if: github.event_name != 'workflow_dispatch' || github.event.inputs.image != ''
+    needs: [tests, matrix]
+    # A dispatch with a digest is a promote run: rebuilding here would re-push the version tag
+    # the merge already published with a new revision label, and move stable-next onto bytes
+    # nobody reviewed. An image-only dispatch (no digest) is still the force-rebuild lever.
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.digest == ''
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -128,9 +155,9 @@ jobs:
           build-args: ${{ steps.args.outputs.args }}
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
-          # No `latest` tag on purpose: deploys pin an exact version, so an image
-          # can never change under a running system. stable-next is the canary channel
-          # for this same build; the version tag is what gets audited.
+          # No `latest` tag on purpose: the version tag is what gets audited, and it is
+          # never re-pushed. stable-next is the canary channel for this same build; only a
+          # promote dispatch moves stable, which is what a deploy follows.
           tags: |
             ${{ needs.matrix.outputs.prefix }}/${{ matrix.image.name }}:${{ matrix.image.version }}
             ${{ needs.matrix.outputs.prefix }}/${{ matrix.image.name }}:stable-next

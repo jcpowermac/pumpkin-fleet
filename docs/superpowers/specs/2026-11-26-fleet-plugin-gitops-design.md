@@ -89,7 +89,8 @@ move rather than a shell script. jcallen chose this and named the channel `stabl
 
 - Every image keeps its exact version tag (`papermc:26.3-258`) — that is what gets built and audited.
 - On a merge to `main` that changes an image's entry in `containers/images.json`, CI builds that version tag **and
-  advances `<image>:stable` to the same digest**. `stable` is the only tag nodes reference, and it moves only by CI.
+  `<image>:stable-next`**, which the canary node follows. `<image>:stable` is the tag every other node follows, and it
+  moves only by an explicit `workflow_dispatch` promote (§7b) — never by a merge.
 - **A version tag is never re-pushed.** A plugin change must therefore change the version, or nothing rebuilds and the
   version tag quietly becomes mutable — which is the thing rule 1 of `containers/README.md` exists to prevent.
   Plugin-bearing images carry a plugin revision in the version: `papermc:26.3-258-p1` → `26.3-258-p2` when only the
@@ -259,7 +260,7 @@ OPanel entry already used. Not a second file: two places declaring the same jars
 A scheduled job in this repo (GitHub Actions `schedule`, same runner class as the existing builds —
 it needs no fleet access, only Hangar/Modrinth/GitHub):
 
-1. Read `containers/plugins.json`.
+1. Read `containers/images.json`.
 2. Resolve each entry: Hangar `GET /api/v1/projects/<slug>/versions?platform=PAPER&platformVersion=<mc>&channel=Release&limit=N`
    (server-side compat filter, verified to work: WorldEdit → 7.4.6 for 26.3, 7.3.9 for 1.21.1, none for
    a fake version); Modrinth `/v2/project/<slug>/version` filtered by `loaders ∩ {paper,bukkit,spigot,folia}`
@@ -268,13 +269,13 @@ it needs no fleet access, only Hangar/Modrinth/GitHub):
 3. Expand dependency closure: Hangar `pluginDependencies[].projectId` resolved through
    `/api/v1/projects/<id>`; Modrinth `dependencies[].project_id`. Required deps become manifest entries
    automatically; optional deps are reported, not installed.
-4. Download candidate jars, compute sha256, and write a branch + PR that edits `plugins.json` with:
+4. Download candidate jars, compute sha256, and write a branch + PR that edits `images.json` with:
    old → new version, upstream changelog URL, sha256, the compat evidence, declared deps added, and a
    **staleness warning** when the newest release predates the server pin (Vault 1.7.3 from 2020 is the
    example). Entries whose newest release does not declare the pinned MC version are reported as
    `incompatible: newest X supports …` and left alone. Entries with `source: manual` are only re-verified.
 5. A human reviews and merges. Merge runs `containers.yml`, which builds the new version tag and
-   advances `stable`. Convergence is then automatic (§1–2).
+   `stable-next`; `stable` moves only by the promote dispatch (§7b). Convergence is then automatic (§1–2).
 
 Rate limits are a non-issue at this scale: 9 declarations resolved in 9 calls / 4.8 s against Hangar's
 20-per-5s and Modrinth's 300-per-minute. The job stays sequential with a small sleep.
@@ -347,7 +348,8 @@ fail loudly when 150 is down (150 is this fleet's own LXC, so reading it is not 
 `scripts/fleet/20-create-nodes.sh` must attach the data disk (§2b) on every create. Today a rebuild depends on spike-era
 state that the repo does not create.
 
-**Data is not at risk in a rebuild, by construction.** `docs/plan.md` Task 8 (copy worlds off the legacy LXCs) is
+**Data is not at risk in a rebuild, by construction** — once step 4 above has run for that node. On 201 the world is
+still on `scsi0` until it does. `docs/plan.md` Task 8 (copy worlds off the legacy LXCs) is
 **descoped** — jcallen's instruction is to leave LXCs 100–107 alone, not read them, not copy from them, not stop them.
 (The authentik LXC 150 is part of *this* fleet and stays in scope; its sssd bind read in `20-create-nodes.sh` is not a
 legacy-LXC touch.) Because `/data` lives on a host-owned zvol (§2b), destroying and recreating a VM is a routine

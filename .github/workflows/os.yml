@@ -30,7 +30,9 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
-  cancel-in-progress: true
+  # Serialise overlapping runs, never cancel one: a promote dispatch would otherwise kill a
+  # scheduled build mid-push.
+  cancel-in-progress: false
 
 jobs:
   bluebuild:

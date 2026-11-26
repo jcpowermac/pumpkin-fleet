@@ -2,6 +2,7 @@
   {
     "name": "v5.5.87 (NeoForge 26.3)",
     "version_number": "v5.5.87-neoforge",
+    "version_type": "release",
     "loaders": [
       "neoforge"
     ],
@@ -24,6 +25,7 @@
   {
     "name": "v5.5.85 (NeoForge 26.x)",
     "version_number": "v5.5.85-neoforge",
+    "version_type": "release",
     "loaders": [
       "neoforge"
     ],
@@ -50,6 +52,7 @@
   {
     "name": "v5.5.85 (Fabric 26.x)",
     "version_number": "v5.5.85-fabric",
+    "version_type": "release",
     "loaders": [
       "fabric"
     ],
@@ -76,6 +79,7 @@
   {
     "name": "v5.5.71 (Velocity)",
     "version_number": "v5.5.71-velocity",
+    "version_type": "release",
     "loaders": [
       "velocity"
     ],
@@ -163,6 +167,7 @@
   {
     "name": "v5.5.71 (Bukkit)",
     "version_number": "v5.5.71-bukkit",
+    "version_type": "release",
     "loaders": [
       "bukkit",
       "folia",
@@ -253,6 +258,7 @@
   {
     "name": "v5.5.57 (NeoForge 26.2)",
     "version_number": "v5.5.57-neoforge",
+    "version_type": "release",
     "loaders": [
       "neoforge"
     ],
@@ -278,6 +284,7 @@
   {
     "name": "v5.5.57 (Fabric 26.2)",
     "version_number": "v5.5.57-fabric",
+    "version_type": "release",
     "loaders": [
       "fabric"
     ],
@@ -303,6 +310,7 @@
   {
     "name": "v5.5.54 (Fabric 26.1.2)",
     "version_number": "v5.5.54-fabric",
+    "version_type": "release",
     "loaders": [
       "fabric"
     ],
@@ -327,6 +335,7 @@
   {
     "name": "v5.5.53 (Velocity)",
     "version_number": "v5.5.53-velocity",
+    "version_type": "release",
     "loaders": [
       "velocity"
     ],
@@ -413,6 +422,7 @@
   {
     "name": "v5.5.53 (Bukkit)",
     "version_number": "v5.5.53-bukkit",
+    "version_type": "release",
     "loaders": [
       "bukkit",
       "folia",
@@ -502,6 +512,7 @@
   {
     "name": "v5.5.52 (NeoForge 26.1.2)",
     "version_number": "v5.5.52-neoforge",
+    "version_type": "release",
     "loaders": [
       "neoforge"
     ],
@@ -526,6 +537,7 @@
   {
     "name": "v5.5.52 (Fabric 26.1.2)",
     "version_number": "v5.5.52-fabric",
+    "version_type": "release",
     "loaders": [
       "fabric"
     ],
