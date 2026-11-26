@@ -81,18 +81,32 @@ velocity `512M`–`1G`). Extra flags go in `JAVA_OPTS`.
 ## Running one
 
 ```sh
-podman run -d --name lobby --init \
+sudo podman run -d --name lobby --init \
+  --restart=unless-stopped \
   --memory 4g --stop-timeout 60 \
-  -p 10.10.10.54:25565:25565 \
+  --network=host \
   -v /srv/lobby/data:/data:Z \
+  -e EULA=true \
   -e JAVA_MEMORY=2G \
   ghcr.io/<owner>/pumpkin-fleet/pumpkin:0.2.2-26.3-26.60
 ```
+
+**Rootful, deliberately.** `tasks/gameserver.py` runs the servers as system containers in
+root's podman store, with `systemctl enable podman-restart.service` bringing them back at
+boot. Rootless was tried and cost three separate landmines — containers dying with the SSH
+session that started them, a subuid-remapped `/data` that needed `podman unshare chown`,
+and containers cockpit could not list without its other-users cgroup scan
+(`docs/spike-notes.md` §16). Rootful: uid 1000 in the container *is* host uid 1000, the
+restart is systemd's job, and cockpit shows the container in the ordinary podman panel
+once the session has Administrative access.
 
 Notes:
 
 - `--init` is **required** for `pumpkin`: PatchBukkit forks a child JVM and the image has
   no `tini` (UBI has no such package), so without `--init` children are never reaped.
+  Harmless for the other images; the deploy always passes it.
+- `--network=host`: one server per VM. The rootless default (pasta) handed the guest the
+  host's own IP and never forwarded — see `docs/spike-notes.md` §16.3.
 - `--stop-timeout 60` gives the server time to save and shut down cleanly on `SIGTERM`.
 - `EULA=true` is required for `papermc`, `neoforge` and `fabric`; without it the container
   has no `eula.txt` and the server refuses to start. `pumpkin` and `velocity` need no EULA.
