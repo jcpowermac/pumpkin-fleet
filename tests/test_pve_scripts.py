@@ -10,6 +10,7 @@ Every test runs against a simulated host: a JSON state file behind a stub `ssh` 
 a state file behind stub `mount`/`umount`/`mountpoint`/`systemctl` for the node, and a stub
 `curl` that serves recorded fixtures. Nothing here reaches 172.31.12.99 or the network.
 """
+import importlib.util
 import json
 import os
 import subprocess
@@ -706,6 +707,24 @@ def test_create_nodes_names_the_missing_sssd_credential(tmp_path):
     assert result.returncode != 0
     assert "authentik LXC 150 unreadable — sssd bind credential unavailable" in result.stderr
     assert result.stdout == "", "nothing may be created or pushed before the credential is read"
+
+
+def test_the_inventory_reaches_every_node_the_scripts_build():
+    """`--group game_nodes` is what deploys and verifies the fleet, and `--limit <node>` is how
+    the canary gets its first container. A commented-out host is a node that silently never
+    gets one while the run still reports green (plugins and neoforge were commented out)."""
+    spec = importlib.util.spec_from_file_location("hosts", REPO / "inventory" / "hosts.py")
+    hosts = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hosts)
+    assert [name for name, _ in hosts.game_nodes] == [node for _, node in NODES]
+    pins = (REPO / "configs" / "pins.env").read_text().splitlines()
+    ips = {
+        line.split("=", 1)[0][3:].lower(): line.split("=", 1)[1].strip()
+        for line in pins
+        if line.startswith("IP_")
+    }
+    for name, data in hosts.game_nodes:
+        assert data["ssh_hostname"] == ips[name], name
 
 
 def create_nodes(pve: Pve, root: Path) -> subprocess.CompletedProcess:
