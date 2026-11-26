@@ -32,30 +32,25 @@ image = f"{REGISTRY}/{image_name}:{next(i['version'] for i in IMAGES if i['name'
 ip = host.data.ssh_hostname
 data_dir = f"/srv/{node}/data"
 
-# SYSTEM containers (rootful podman), not rootless under `core`. Rootless costs
-# three landmines and buys nothing here: containers need linger to survive logout
-# (spike-notes §16.1), the volume needs `podman unshare chown` because uid 1000 is
-# remapped into the subuid range (§16.2), and cockpit cannot show them without the
-# other-user cgroup scan, which only ever runs at page mount (§16.5).
-# Rootful: uid 1000 in the container IS host uid 1000 (plain chown), restarts are
-# podman-restart.service's job, and cockpit's ordinary privileged session lists
-# them next to its own `ws` container.
+# Rootless podman containers die with the SSH session that started them unless
+# the user lingers (logind tears down user@N and its container scopes).
+server.shell(name="Enable linger for the service user", commands="loginctl enable-linger core", _sudo=True)
 files.directory(path=data_dir, _sudo=True)
-server.shell(name=f"Own {data_dir} by container uid 1000", commands=f"chown -R 1000:1000 {data_dir}", _sudo=True)
-# Rootful containers are re-started at boot by this unit, not by a login session.
-server.shell(
-    name="Enable podman-restart.service (rootful containers survive reboot)",
-    commands="systemctl enable podman-restart.service",
-    _sudo=True,
-)
+# files.directory above creates it root-owned, and inside `podman unshare` uid 0 IS
+# `core`, so a namespace chown of a root-owned dir is EPERM. Hand the directory
+# itself to core first (not -R: the contents keep their container ownership).
+server.shell(name=f"Hand {data_dir} to the service user", commands=f"chown core:core {data_dir}", _sudo=True)
+# Container runs as uid/gid 1000. podman for `core` remaps uids (subuid range),
+# so chown inside podman's own namespace — chowning to host uid 1000 does not work.
+server.shell(name=f"Own {data_dir} by container uid 1000", commands=f"podman unshare chown -R 1000:1000 {data_dir}")
 
 # --- ops visibility in cockpit (task 7) ----------------------------------
-# Operators log into cockpit as an LDAP/authentik user (e.g. jcallen), not as root,
-# so the game container only appears once the session holds a privileged (root)
-# bridge — same as cockpit's own `ws` container. That needs the ops authentik group
-# to get cockpit's root-bridge polkit action; OPS_GROUP is the authentik group
-# synced via sssd (docs/ldap-handoff.md). Then: Administrative access, and the
-# container is in the ordinary podman panel (no other-user cgroup scan involved).
+# The container runs under this node's default user (core, uid 1000) rootless podman.
+# Operators log into cockpit as an LDAP/authentik user (e.g. jcallen) whose OWN
+# podman store is empty. cockpit-podman only lists *other* users' containers when
+# the session is privileged (its cgroup scan runs with superuser:"require"). So
+# grant the ops authentik group cockpit's root-bridge polkit action. OPS_GROUP is
+# the authentik group synced via sssd (docs/ldap-handoff.md).
 OPS_GROUP = "fleet-admins"
 _polkit_js = (
     'polkit.addRule(function(action, subject) {\n'
@@ -96,21 +91,13 @@ server.shell(
         + " && sudo visudo -cf /etc/sudoers.d/cockpit-fleet >/dev/null"
     ),
 )
-# Migration guard: a rootless container of the same name would fight the rootful one
-# for --network=host ports (and answer the port check, hiding the conflict).
-# Harmless on a fresh node.
-server.shell(
-    name=f"Remove any rootless {node} container (pre-rootful deployments)",
-    commands=f"podman rm -f {node} 2>/dev/null || true",
-)
-
-# cockpit-podman talks to the rootful API socket; keep it across reboots.
-server.shell(name="Enable podman.socket (system unit)", commands="systemctl enable --now podman.socket", _sudo=True)
+# Keep the podman API socket alive across reboots (cockpit-podman connects here;
+# with linger on, the user manager stays up so this socket persists).
+server.shell(name="Enable podman.socket (user unit)", commands="systemctl --user enable --now podman.socket")
 
 server.shell(
     name=f"Pull {image} (skip if already local)",
     commands=f"podman image exists {image} || podman pull {image}",
-    _sudo=True,
 )
 
 # OPanel is a native Pumpkin plugin (cdylib) that runs in-process inside the server.
@@ -127,12 +114,12 @@ if opanel and not opanel.get("bundled"):
     server.shell(
         name=f"Install OPanel {opanel['version']} into the data volume",
         commands=(
-            f"sudo podman run --rm --security-opt label=disable --entrypoint sh -v {data_dir}:/data {image} "
+            f"podman run --rm --security-opt label=disable --entrypoint sh -v {data_dir}:/data {image} "
             f"-c 'sha256sum /data/plugins/libopanel_pumpkin.so 2>/dev/null' "
             f"| grep -q {opanel['sha256']} && exit 0; "
-            f"sudo curl -fsSL -o /tmp/opanel.so {opanel['url']} && "
+            f"curl -fsSL -o /tmp/opanel.so {opanel['url']} && "
             f"echo '{opanel['sha256']}  /tmp/opanel.so' | sha256sum -c - >/dev/null && "
-            f"sudo podman run --rm -i --security-opt label=disable --entrypoint sh --user 1000:1000 "
+            f"podman run --rm -i --security-opt label=disable --entrypoint sh --user 1000:1000 "
             f"-v {data_dir}:/data {image} "
             f"-c 'cat > /data/plugins/libopanel_pumpkin.so' < /tmp/opanel.so && "
             "rm -f /tmp/opanel.so"
@@ -150,23 +137,22 @@ _env = f"--env EULA=true --env JAVA_MEMORY={java_mem}"
 _desired = hashlib.sha256(
     f"{image} {mem} {_env} {(opanel or {}).get('sha256', '')}".encode()
 ).hexdigest()
-_pin_file = f"/var/lib/fleet/{node}.pin"
+_pin_file = f"~/.fleet-{node}.pin"
 server.shell(
     name=f"Run {node} server container",
     commands=(
-        f'sudo mkdir -p /var/lib/fleet; '
-        f'if [ "$(sudo cat {_pin_file} 2>/dev/null)" = "{_desired}" ] '
-        f'&& [ -n "$(sudo podman ps -q --filter name=^{node}$)" ]; then '
+        f'if [ "$(cat {_pin_file} 2>/dev/null)" = "{_desired}" ] '
+        f'&& [ -n "$(podman ps -q --filter name=^{node}$)" ]; then '
         f'echo "{node} already up on this pin, not restarting"; exit 0; fi; '
-        f"sudo podman rm -f {node} 2>/dev/null || true; "
-        f"sudo podman run -d --name {node} --init "
+        f"podman rm -f {node} 2>/dev/null || true; "
+        f"podman run -d --name {node} --init "
         f"--restart=unless-stopped "
         f"--memory {mem} --stop-timeout 60 "
         f"--network=host "
         f"-v {data_dir}:/data:Z "
         f"{_env} "
         f"{image} "
-        f">/dev/null && echo {_desired} | sudo tee {_pin_file} >/dev/null"
+        f">/dev/null && echo {_desired} > {_pin_file}"
     ),
 )
 server.shell(
@@ -175,7 +161,7 @@ server.shell(
         "for i in $(seq 1 60); do "
         f"timeout 2 bash -c 'exec 3<>/dev/tcp/{ip}/25565' 2>/dev/null && exit 0; "
         "sleep 2; done; "
-        "echo '{node} port 25565 never opened'; sudo podman logs --tail 50 {node}; exit 1"
+        "echo '{node} port 25565 never opened'; podman logs --tail 50 {node}; exit 1"
     ).format(node=node),
 )
 # uCore runs firewalld (FedoraServer zone) with only ssh/cockpit open; the

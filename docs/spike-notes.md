@@ -384,24 +384,16 @@ The images build fine in Actions, but *consuming* them on the uCore nodes had
 four independent landmines. All fixed in `tasks/gameserver.py`; this is why each
 exists:
 
-> **Superseded 2026-11-25: the game containers are ROOTFUL now** (`sudo podman`, root
-> store, `podman-restart.service` at boot). That deletes items 1 and 2 below and makes
-> cockpit behave (see item 5). Kept because the failure modes are easy to reintroduce.
-
 1. **`podman run -d` dies with the SSH session that started it.** Rootless podman
    runs in a user cgroup scoped to the session; logind tears it down on logout and
    kills the container (clean `Exited (0)`, no error).
-   Rootless fix: `sudo loginctl enable-linger core`. Symptom without it: container
-   "Up" during the pyinfra run, `Exited (0)` seconds after `Disconnecting from hosts`.
-   Rootful: not an issue.
-2. **Data dir ownership must be set inside podman's uid namespace.** Rootless, the
-   container runs as uid/gid 1000 but podman for `core` remaps uids (subuid
-   `524288`). A host-side `chown 1000:1000 /srv/<node>/data` then makes the dir
-   *root-owned inside the container* → entrypoint `mkdir /data/plugins: Permission
-   denied` loop. Rootless fix: `podman unshare chown -R 1000:1000 /srv/<node>/data`.
-   Rootful: plain `chown -R 1000:1000`, no namespace involved. **Migrating rootless →
-   rootful must rewrite the volume's owner** (`525287` → `1000`), or the server can
-   read nothing.
+   Fix: `sudo loginctl enable-linger core`. Symptom without it: container "Up" during
+   the pyinfra run, `Exited (0)` seconds after `Disconnecting from hosts`.
+2. **Data dir ownership must be set inside podman's uid namespace.** The container
+   runs as uid/gid 1000, but podman for `core` remaps uids (subuid `524288`). A
+   host-side `chown 1000:1000 /srv/<node>/data` makes the dir *root-owned inside the
+   container* → entrypoint `mkdir /data/plugins: Permission denied` loop.
+   Fix: `podman unshare chown -R 1000:1000 /srv/<node>/data`.
 3. **`--network=host`, not the default pasta.** Rootless default netns (pasta with
    `--config-net`) gave the guest the *host's own IP* (10.10.10.54) and the
    host→guest forward never delivered: TCP connects, handshake times out, and
@@ -411,15 +403,12 @@ exists:
    with only ssh/cockpit open; the port bind lands on the host interface and is
    dropped. Fix: `firewall-cmd --add-port=25565/tcp --permanent && reload`.
    Does not survive an OSTree rebase — revisit for Task 7 Step 3.
-5. **cockpit-podman shows containers only in a PRIVILEGED session.** jcallen (uid
-   2007) has an empty store of his own, so before 2026-11-25 the game container could
-   only be found by the *other users'* cgroup scan, which is `superuser: require` and
-   **only runs at page mount** — the reload trap below. The deploy is rootful now, so
-   the container sits in the same root store as cockpit's own `ws` container and needs
-   nothing but Administrative access. (The rootless-era detail, kept because it still
-   applies to any rootless workload: core's store lives at
-   `/run/user/1000/podman/podman.sock`, and cockpit-podman finds other users by
-   scanning `/sys/fs/cgroup` for `libpod.*scope`/`podman-*.scope`.)
+5. **The game container runs as `core`, so cockpit only shows it in a PRIVILEGED
+   session.** Rootless podman puts it in core's store
+   (`/run/user/1000/podman/podman.sock`); jcallen (uid 2007) has an empty store of his
+   own. cockpit-podman finds *other users'* containers by scanning
+   `/sys/fs/cgroup` for `libpod.*scope`/`podman-*.scope`, and that scan is
+   `superuser: require` — so with a non-privileged session the panel is simply empty.
    **Do not conclude the grant is broken:** verify `sudo -l -U jcallen` lists
    `/usr/bin/cockpit-bridge`, `systemctl --user is-active podman.socket` (as core) is
    active, then click **Administrative access** in cockpit and confirm with the
