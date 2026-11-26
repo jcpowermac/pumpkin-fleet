@@ -9,6 +9,7 @@ is bind-mounted at /data (seeded once by the entrypoint, survives OS rebases).
 Usage: uv run pyinfra inventory/hosts.py --limit lobby tasks/gameserver.py
 """
 import base64
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -21,6 +22,13 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 import render_quadlet  # noqa: E402
 
+# Same module the node runs, so the expected-jar list is written by the code that reads it.
+_spec = importlib.util.spec_from_file_location(
+    "verify_plugins", REPO / "scripts" / "fleet" / "verify-plugins.py"
+)
+verify_plugins = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(verify_plugins)
+
 IMAGES = json.loads((REPO / "containers" / "images.json").read_text())
 REGISTRY = "ghcr.io/jcpowermac/pumpkin-fleet"
 
@@ -31,14 +39,6 @@ WORKLOADS = {
     "vanilla": ("fabric", "3g", "2G"),
     "neoforge": ("neoforge", "6g", "4G"),
 }
-
-
-def _pin(key: str) -> str:
-    for line in (REPO / "configs" / "pins.env").read_text().splitlines():
-        name, _, value = line.partition("=")
-        if name.strip() == key:
-            return value.split("#")[0].strip().strip('"')
-    raise KeyError(f"{key} is missing from configs/pins.env")
 
 
 def _push(name: str, text: str, dest: str, *, sudo: bool) -> None:
@@ -56,7 +56,7 @@ def _push(name: str, text: str, dest: str, *, sudo: bool) -> None:
 node = host.name
 image_name, mem, java_mem = WORKLOADS[node]
 image = f"{REGISTRY}/{image_name}"
-channel = _pin("FLEET_CHANNEL_CANARY") if node == _pin("CANARY_NODE") else _pin("FLEET_CHANNEL")
+channel = render_quadlet.channel_for(node)
 ip = host.data.ssh_hostname
 data_dir = f"/srv/{node}/data"
 unit = f"~/.config/containers/systemd/{node}.container"
@@ -166,7 +166,9 @@ server.shell(
 # --- the reboot window ----------------------------------------------------
 # Bare-metal reboot, so these are *system* units (/etc). The gate reads the node's own
 # server over mc-ping, so both files are deployed with it.
-_reboot_timer, _reboot_service = render_quadlet.render_reboot_units(node, _pin("REBOOT_ONCALENDAR"))
+_reboot_timer, _reboot_service = render_quadlet.render_reboot_units(
+    node, render_quadlet.pin("REBOOT_ONCALENDAR")
+)
 server.shell(name=f"Create {render_quadlet.FLEET_LIB}", commands=f"mkdir -p {render_quadlet.FLEET_LIB}", _sudo=True)
 _push(
     name="Install mc-ping.py (the reboot gate's probe)",
@@ -196,6 +198,30 @@ server.shell(
     name="Enable fleet-reboot.timer",
     commands="systemctl daemon-reload && systemctl enable --now fleet-reboot.timer",
     _sudo=True,
+)
+
+# --- the plugin check -----------------------------------------------------
+# The declared set comes from containers/images.json, never hand-maintained here, so a
+# plugin bump changes this file in the same deploy that ships the image.
+expected_jars = verify_plugins.expected_jars(REPO / "containers" / "images.json", image_name)
+server.shell(name="Create /etc/fleet", commands="mkdir -p /etc/fleet", _sudo=True)
+_push(
+    name=f"Install the expected plugin list ({image_name})",
+    text="".join(f"{name}\n" for name in sorted(expected_jars)),
+    dest=f"/etc/fleet/expected-plugins.{image_name}.txt",
+    sudo=True,
+)
+_push(
+    name="Install verify-plugins.py",
+    text=(REPO / "scripts" / "fleet" / "verify-plugins.py").read_text(),
+    dest=f"{render_quadlet.FLEET_LIB}/verify-plugins.py",
+    sudo=True,
+)
+_push(
+    name="Install fleet-verify.service",
+    text=render_quadlet.render_verify_unit(node, image_name, data_dir),
+    dest=f"{render_quadlet.REGISTRY_UNITS}/fleet-verify.service",
+    sudo=True,
 )
 
 # uCore runs firewalld (FedoraServer zone) with only ssh/cockpit open; the container
@@ -230,4 +256,15 @@ server.shell(
 server.shell(
     name=f"{node} answers on {ip}:25565",
     commands=f"timeout 2 bash -c 'exec 3<>/dev/tcp/{ip}/25565' || exit 1",
+)
+# Last, because it reads the log of a container that has only just started. The oneshot
+# exits 0 even when it reports failures, so a bad plugin set shows up here and in
+# /run/fleet-verify.status — never as a failed deploy step.
+server.shell(
+    name=f"Check the declared plugins loaded on {node}",
+    commands=(
+        "systemctl daemon-reload && systemctl start fleet-verify.service && "
+        "cat /run/fleet-verify.status"
+    ),
+    _sudo=True,
 )

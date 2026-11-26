@@ -8,6 +8,8 @@ so boot persistence is the `[Install]` section the generator applies. The handov
 shell is the one-time move from a `podman run` container to the unit that replaces
 it, and it must never SIGKILL a loaded world.
 """
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -78,15 +80,99 @@ def test_reboot_service_is_a_oneshot_running_the_gate():
     assert "lobby" in service
 
 
-def test_handover_stops_a_foreign_container_gracefully_before_removing_it():
+def handover_calls(tmp_path, *, unit_active: bool, container_exists: bool) -> list[str]:
+    """Run the emitted handover shell under bash with stub podman/systemctl on PATH.
+
+    Substring assertions on the command would still pass with the guard inverted to
+    `is-active … || exit 0`, which hands over nothing or kills a live server; only the
+    calls the shell actually makes tell the branches apart.
+    """
+    stub = tmp_path / "bin"
+    stub.mkdir()
+    log = tmp_path / "calls.log"
+    (stub / "systemctl").write_text(
+        '#!/bin/sh\n'
+        'echo "systemctl $*" >> "$CALL_LOG"\n'
+        'case "$*" in\n'
+        '  "--user is-active --quiet lobby.service") [ "$UNIT_ACTIVE" = 1 ] ;;\n'
+        '  *) exit 1 ;;\n'
+        'esac\n'
+    )
+    (stub / "podman").write_text(
+        '#!/bin/sh\n'
+        'echo "podman $*" >> "$CALL_LOG"\n'
+        'case "$1 $2" in\n'
+        '  "container exists") [ "$CONTAINER_EXISTS" = 1 ] ;;\n'
+        '  *) : ;;\n'
+        'esac\n'
+    )
+    for script in stub.iterdir():
+        script.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": f"{stub}:{os.environ['PATH']}",
+        "CALL_LOG": str(log),
+        "UNIT_ACTIVE": "1" if unit_active else "0",
+        "CONTAINER_EXISTS": "1" if container_exists else "0",
+    }
+    result = subprocess.run(
+        ["/bin/bash", "-c", render_quadlet.handover_command("lobby")],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    return log.read_text().splitlines() if log.exists() else []
+
+
+def test_handover_leaves_the_quadlet_owned_container_alone(tmp_path):
+    """Unit active: not one podman call — the unit already owns that container."""
+    calls = handover_calls(tmp_path, unit_active=True, container_exists=True)
+    assert calls == ["systemctl --user is-active --quiet lobby.service"], calls
+
+
+def test_handover_stops_a_foreign_container_gracefully_before_removing_it(tmp_path):
     """`podman rm -f` would SIGKILL a loaded world; the old deploy did exactly that."""
-    command = render_quadlet.handover_command("lobby")
-    assert "podman rm -f" not in command
-    assert "podman stop --time 60 lobby" in command
-    assert command.index("podman stop") < command.index("podman rm lobby")
+    calls = handover_calls(tmp_path, unit_active=False, container_exists=True)
+    assert calls == [
+        "systemctl --user is-active --quiet lobby.service",
+        "podman container exists lobby",
+        "podman stop --time 60 lobby",
+        "podman rm lobby",
+    ], calls
+    assert "-f" not in calls[-2]
 
 
-def test_handover_leaves_the_quadlet_owned_container_alone():
-    command = render_quadlet.handover_command("lobby")
-    assert command.index("is-active --quiet lobby.service") < command.index("podman stop")
-    assert command.index("is-active --quiet lobby.service") < command.index("podman rm lobby")
+def test_handover_is_a_no_op_when_no_container_exists(tmp_path):
+    """Second run of a fresh deploy: the container is gone, nothing to stop."""
+    calls = handover_calls(tmp_path, unit_active=False, container_exists=False)
+    assert calls == [
+        "systemctl --user is-active --quiet lobby.service",
+        "podman container exists lobby",
+    ], calls
+
+
+def test_verify_unit_is_a_oneshot_after_the_container_and_reads_the_log_as_core():
+    """`After=<node>.service` plus a oneshot: the check runs after the server is up, and
+    it never restarts anything (a restart would drop a loaded world)."""
+    text = render_quadlet.render_verify_unit("lobby", "papermc", "/srv/lobby/data")
+    assert "Type=oneshot" in text
+    assert "After=lobby.service" in text
+    assert (
+        "ExecStart=/usr/bin/python3 /usr/local/lib/fleet/verify-plugins.py "
+        "--image papermc --data-dir /srv/lobby/data" in text
+    )
+    # The container is rootless under core; root's own podman store is empty.
+    assert 'sudo -u core env XDG_RUNTIME_DIR=/run/user/1000 podman logs lobby' in text
+    assert "Restart=" not in text
+    assert "podman restart" not in text
+    assert "podman rm" not in text
+
+
+def test_canary_is_chosen_by_node_name_and_nothing_else():
+    """This is the only thing that puts a node on the pre-promotion tag."""
+    assert render_quadlet.channel_for("plugins") == "stable-next"
+    assert render_quadlet.channel_for("lobby") == "stable"
+    assert render_quadlet.channel_for("vanilla") == "stable"
+    assert render_quadlet.channel_for("neoforge") == "stable"

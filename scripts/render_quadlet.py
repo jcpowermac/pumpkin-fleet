@@ -7,9 +7,25 @@ reboots the machine. And a quadlet unit can never be `systemctl enable`d — it 
 generated into a generator directory on every daemon-reload — so boot persistence is
 the `[Install]` section the generator applies, which is why it is emitted here.
 """
+from pathlib import Path
 
 REGISTRY_UNITS = "/etc/systemd/system"
 FLEET_LIB = "/usr/local/lib/fleet"
+PINS = Path(__file__).resolve().parent.parent / "configs" / "pins.env"
+
+
+def pin(key: str) -> str:
+    """One value out of configs/pins.env — the file is the only place channels live."""
+    for line in PINS.read_text().splitlines():
+        name, _, value = line.partition("=")
+        if name.strip() == key:
+            return value.split("#")[0].strip().strip('"')
+    raise KeyError(f"{key} is missing from configs/pins.env")
+
+
+def channel_for(node: str) -> str:
+    """The canary is chosen by node name (never a VMID) and follows the pre-promotion tag."""
+    return pin("FLEET_CHANNEL_CANARY") if node == pin("CANARY_NODE") else pin("FLEET_CHANNEL")
 
 
 def render_container_unit(
@@ -64,6 +80,24 @@ Type=oneshot
 ExecStart=/usr/bin/python3 {FLEET_LIB}/reboot-gate.py
 """
     return timer, service
+
+
+def render_verify_unit(node: str, image_name: str, data_dir: str) -> str:
+    """The node-side plugin check, started after the node's container unit.
+
+    A *system* oneshot because it writes /run/fleet-verify.status and reads /etc/fleet,
+    both root's. The server runs rootless under `core`, so the log is read as core with
+    its runtime dir — a plain `podman logs` as root looks in root's empty podman store.
+    """
+    return f"""\
+[Unit]
+Description=pumpkin fleet {node}: did the declared plugins load?
+After={node}.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 {FLEET_LIB}/verify-plugins.py --image {image_name} --data-dir {data_dir} --log-from "sudo -u core env XDG_RUNTIME_DIR=/run/user/1000 podman logs {node}"
+"""
 
 
 def handover_command(node: str) -> str:

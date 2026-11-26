@@ -15,6 +15,7 @@ allowed, the container comes back with the unit, and the crash is only visible a
 
 Usage: reboot-gate.py [--dry-run]   # --dry-run prints the decision, never reboots
 """
+import argparse
 import json
 import subprocess
 import sys
@@ -40,7 +41,9 @@ def should_reboot(ping: dict | None) -> bool:
     if ping is None:
         print("reboot allowed: the server is not answering, so nobody is playing")
         return True
-    online = ping["players"]["online"]
+    # A payload without a player count must not raise: an exception here stops every
+    # automatic OS-update reboot on the node, silently.
+    online = (ping.get("players") or {}).get("online", 0)
     if online:
         print(f"skip: {online} players online")
         return False
@@ -49,9 +52,14 @@ def should_reboot(ping: dict | None) -> bool:
 
 
 def main() -> None:
+    # argparse, not a substring scan: `--dryrun` / `-n` / `--dry-run=true` used to fall
+    # through to the reboot. An unknown flag now exits 2 before anything is probed.
+    parser = argparse.ArgumentParser(description="Reboot into the staged OS deployment.")
+    parser.add_argument("--dry-run", action="store_true", help="print the decision, never reboot")
+    args = parser.parse_args()
     if not should_reboot(ping()):
         return
-    if "--dry-run" in sys.argv[1:]:
+    if args.dry_run:
         return
     subprocess.run(["systemctl", "reboot"], check=True)
 

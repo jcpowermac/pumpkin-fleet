@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parent.parent
 GATE = REPO / "scripts" / "fleet" / "reboot-gate.py"
 
@@ -34,6 +36,14 @@ def test_unreachable_server_allows_the_reboot(capsys):
     assert "not answering" in capsys.readouterr().out
 
 
+def test_a_status_without_a_player_count_allows_the_reboot(capsys):
+    """A status payload without `players` (or with a null one) must not raise: an
+    exception here silently stops every OS update reboot on the node."""
+    assert reboot_gate.should_reboot({"version": {"name": "Paper", "protocol": 777}}) is True
+    assert reboot_gate.should_reboot({"players": None}) is True
+    assert "reboot allowed" in capsys.readouterr().out
+
+
 def test_dry_run_prints_the_decision_and_does_not_reboot():
     """`--dry-run` is how the deploy proves the gate on a node without rebooting it."""
     out = subprocess.run(
@@ -42,3 +52,13 @@ def test_dry_run_prints_the_decision_and_does_not_reboot():
     assert out.returncode == 0, out.stderr
     assert "reboot allowed" in out.stdout or "skip:" in out.stdout
     assert "systemctl" not in out.stdout
+
+
+@pytest.mark.parametrize("flag", ["--dryrun", "-n", "--dry-run=true"])
+def test_an_unknown_flag_exits_two_and_never_reboots(flag):
+    """A near-miss of --dry-run must not fall through to `systemctl reboot`."""
+    out = subprocess.run(
+        [sys.executable, str(GATE), flag], capture_output=True, text=True, timeout=60
+    )
+    assert out.returncode == 2, (out.returncode, out.stdout, out.stderr)
+    assert "reboot" not in out.stdout
