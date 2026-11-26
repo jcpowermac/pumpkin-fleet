@@ -57,14 +57,14 @@
         "sha256": "81a1ef49567f76ba4ad43f7489080bc580e3fcf3d9601b7e852820ed4b6cecc7",
         "deps": [
           {
-            "slug": "viaversion",
-            "name": "ViaVersion",
-            "required": true
-          },
-          {
             "slug": "viarewind",
             "name": "ViaRewind",
             "required": false
+          },
+          {
+            "slug": "viaversion",
+            "name": "ViaVersion",
+            "required": true
           }
         ]
       },
@@ -81,13 +81,13 @@
         "sha256": "f5113ea939353fec6170e6d1b7d2326fab76fa8d0cee594f689796995fc96720",
         "deps": [
           {
-            "slug": "viaversion",
-            "name": "ViaVersion",
+            "slug": "viabackwards",
+            "name": "ViaBackwards",
             "required": true
           },
           {
-            "slug": "viabackwards",
-            "name": "ViaBackwards",
+            "slug": "viaversion",
+            "name": "ViaVersion",
             "required": true
           }
         ]

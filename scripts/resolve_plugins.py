@@ -152,7 +152,10 @@ def _hangar_deps(p: Plugin, declared: list[dict]) -> list[dict]:
                               f"failed with HTTP {exc.code}") from exc
         deps.append({"slug": project["namespace"]["slug"].lower(), "name": project["name"],
                      "required": declared_dep["required"]})
-    return deps
+    # shortcut: Hangar does not order pluginDependencies, so an unsorted list makes the same
+    # plugin set look like a manifest change on the next run. Sorting by slug keeps --check
+    # and --bump idempotent; upgrade to Hangar's own ordering if it ever becomes meaningful.
+    return sorted(deps, key=lambda dep: dep["slug"])
 
 
 def expand_hangar_deps(p: Plugin) -> list[Plugin]:

@@ -132,6 +132,25 @@ def test_hangar_dependency_slugs_come_from_the_project_lookup(monkeypatch):
     assert {d["slug"] for d in p.deps} == {"viabackwards", "viarewind"}
 
 
+def test_dependency_order_is_stable_across_runs(monkeypatch):
+    """Hangar answers pluginDependencies in an unstable order (seen live: ViaRewind before
+    ViaBackwards on one call, the other way on the next). An unsorted list makes an unchanged
+    plugin set look like a change, so deps are recorded sorted by slug."""
+    body = _synthetic_hangar(False)
+    body["result"][0]["pluginDependencies"]["PAPER"] = [
+        {"name": "ViaRewind", "projectId": 112, "required": False},
+        {"name": "ViaBackwards", "projectId": 12, "required": False},
+    ]
+    monkeypatch.setattr(rp, "fetch_json", _fetch({
+        "versions": body,
+        "projects/12": _fixture("hangar_dep_projects.json")["12"],
+        "projects/112": _fixture("hangar_dep_projects.json")["112"],
+    }))
+    seed = rp.Plugin(name="Foo", slug="foo", source="hangar", install_as="Foo.jar", mc=["26.3"])
+    p = rp.resolve_hangar(seed, "26.3")
+    assert [dep["slug"] for dep in p.deps] == ["viabackwards", "viarewind"]
+
+
 def _synthetic_hangar(dep_required):
     """Minimal Hangar versions body with one required/optional dependency."""
     return {"pagination": {"count": 1}, "result": [{
