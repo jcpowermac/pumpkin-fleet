@@ -419,10 +419,18 @@ exists:
    **The scan runs once, in `componentDidMount`, and nothing re-runs it when the
    session is later elevated** (cockpit-podman 132 only listens for
    `locationchanged`). Elevating while the Podman page is open leaves it empty —
-   reload the page after acquiring Administrative access. The two silent outcomes
-   go to the *browser* console, not the server: `unprivileged session, skipping
-   detection of other users` vs `getInfo failed` (on any error the user is dropped
-   from the list with no UI message).
+   **acquire Administrative access first, then reload the Podman page**; that is
+   the whole fix (confirmed 2026-11-25 on vanilla: after the reload the panel lists
+   `vanilla`). The two silent outcomes go to the *browser* console, not the server:
+   `unprivileged session, skipping detection of other users` vs `getInfo failed`
+   (on any error the user is dropped from the list with no UI message).
+
+   Before treating it as a node fault, note that lobby and vanilla measure
+   **identically** on every input the plugin uses — same unit
+   (`-v /:/host --pid host --privileged`), same scan output (`1 1000 core`), same
+   container cgroup shape, same socket ownership, same sudo grant, no AVCs. There is
+   nothing to diff between machines; the state that decides this lives in the
+   browser.
 
    Verified on vanilla 2026-11-25, so the daemon side can be excluded in one shot
    (as root, all should be 200):
