@@ -114,6 +114,8 @@ WantedBy=timers.target
     service = f"""\
 [Unit]
 Description=pumpkin fleet {node}: did the declared plugins load?
+# No effect: the container is a *user* unit and a system unit cannot order after it. The
+# timer is what schedules this check; the line is kept only because the brief asks for it.
 After={node}.service
 
 [Service]

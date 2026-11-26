@@ -132,7 +132,13 @@ server.shell(
     commands=(
         f"mountpoint -q {data_dir} || "
         f"{{ echo '{data_dir} is not a mountpoint — refusing to write a world onto the OS disk'; "
-        f"findmnt -T {data_dir}; exit 1; }}"
+        f"findmnt -T {data_dir}; exit 1; }}; "
+        # The unit file can be rewritten while the active mount stays on the previous device
+        # (renamed by-id path, a pin that moved): the deploy would report success and the node
+        # would come back on the wrong disk at the next boot.
+        f"src=$(findmnt -no SOURCE {data_dir}) || exit 1; "
+        f'[ "$src" = "{device}" ] || {{ echo "{data_dir} is mounted from $src, not {device} — "'
+        f'"the active mount is not the disk the unit names; a reboot would move the world"; exit 1; }}'
     ),
 )
 
@@ -247,43 +253,6 @@ server.shell(
     commands="systemctl --user enable --now podman-auto-update.timer",
 )
 
-# --- the reboot window ----------------------------------------------------
-# Bare-metal reboot, so these are *system* units (/etc). The gate reads the node's own
-# server over mc-ping, so both files are deployed with it.
-_reboot_timer, _reboot_service = render_quadlet.render_reboot_units(
-    node, render_quadlet.pin("REBOOT_ONCALENDAR")
-)
-server.shell(name=f"Create {render_quadlet.FLEET_LIB}", commands=f"mkdir -p {render_quadlet.FLEET_LIB}", _sudo=True)
-_push(
-    name="Install mc-ping.py (the reboot gate's probe)",
-    text=(REPO / "scripts" / "mc-ping.py").read_text(),
-    dest=f"{render_quadlet.FLEET_LIB}/mc-ping.py",
-    sudo=True,
-)
-_push(
-    name="Install reboot-gate.py",
-    text=(REPO / "scripts" / "fleet" / "reboot-gate.py").read_text(),
-    dest=f"{render_quadlet.FLEET_LIB}/reboot-gate.py",
-    sudo=True,
-)
-_push(
-    name="Install fleet-reboot.service",
-    text=_reboot_service,
-    dest=f"{render_quadlet.REGISTRY_UNITS}/fleet-reboot.service",
-    sudo=True,
-)
-_push(
-    name="Install fleet-reboot.timer",
-    text=_reboot_timer,
-    dest=f"{render_quadlet.REGISTRY_UNITS}/fleet-reboot.timer",
-    sudo=True,
-)
-server.shell(
-    name="Enable fleet-reboot.timer",
-    commands="systemctl daemon-reload && systemctl enable --now fleet-reboot.timer",
-    _sudo=True,
-)
-
 # --- the plugin check -----------------------------------------------------
 # The declared set comes from containers/images.json, never hand-maintained here, so a
 # plugin bump changes this file in the same deploy that ships the image.
@@ -350,6 +319,14 @@ if opanel:
         commands="firewall-cmd --add-port=3000/tcp --permanent && firewall-cmd --reload",
         _sudo=True,
     )
+else:
+    # lobby ran the OPanel image before papermc. The permanent rule survived that change and
+    # nothing listens on 3000 now, so the deploy closes it; removing an absent port is a no-op.
+    server.shell(
+        name="Close 3000/tcp (this image has no OPanel) in firewalld",
+        commands="firewall-cmd --remove-port=3000/tcp --permanent && firewall-cmd --reload",
+        _sudo=True,
+    )
 # After the firewall rule, not before: the probe hits this node's own host address, which
 # firewalld's zone drops on a node where 25565 was never opened.
 server.shell(
@@ -372,5 +349,51 @@ server.shell(
 server.shell(
     name=f"Check the declared plugins loaded on {node}",
     commands="systemctl start fleet-verify.service && cat /run/fleet-verify.status",
+    _sudo=True,
+)
+
+# --- the reboot window ----------------------------------------------------
+# LAST, and the timer is the very last op: `Persistent=true` with no stamp makes a first
+# elapse due as soon as the timer exists, so a deploy that installed it earlier could be
+# rebooted in the middle of its own firewall/verify steps. Bare-metal reboot, so these are
+# *system* units (/etc); the gate reads the node's own server over mc-ping.
+_reboot_timer, _reboot_service = render_quadlet.render_reboot_units(
+    node, render_quadlet.pin("REBOOT_ONCALENDAR")
+)
+server.shell(name=f"Create {render_quadlet.FLEET_LIB}", commands=f"mkdir -p {render_quadlet.FLEET_LIB}", _sudo=True)
+_push(
+    name="Install mc-ping.py (the reboot gate's probe)",
+    text=(REPO / "scripts" / "mc-ping.py").read_text(),
+    dest=f"{render_quadlet.FLEET_LIB}/mc-ping.py",
+    sudo=True,
+)
+_push(
+    name="Install reboot-gate.py",
+    text=(REPO / "scripts" / "fleet" / "reboot-gate.py").read_text(),
+    dest=f"{render_quadlet.FLEET_LIB}/reboot-gate.py",
+    sudo=True,
+)
+_push(
+    name="Install fleet-reboot.service",
+    text=_reboot_service,
+    dest=f"{render_quadlet.REGISTRY_UNITS}/fleet-reboot.service",
+    sudo=True,
+)
+_push(
+    name="Install fleet-reboot.timer",
+    text=_reboot_timer,
+    dest=f"{render_quadlet.REGISTRY_UNITS}/fleet-reboot.timer",
+    sudo=True,
+)
+# Proved here, before the timer can fire it: a gate whose only other caller is the timer is
+# unproven until it has already rebooted something.
+server.shell(
+    name="Prove the reboot gate on this node (dry run, never reboots)",
+    commands=f"/usr/bin/python3 {render_quadlet.FLEET_LIB}/reboot-gate.py --dry-run",
+    _sudo=True,
+)
+server.shell(
+    name="Enable fleet-reboot.timer",
+    commands="systemctl daemon-reload && systemctl enable --now fleet-reboot.timer",
     _sudo=True,
 )

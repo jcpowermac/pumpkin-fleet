@@ -15,11 +15,15 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
-SSH_HOSTNAMES = {"plugins": "10.10.10.55", "lobby": "10.10.10.54"}
+SSH_HOSTNAMES = {
+    "plugins": "10.10.10.55",
+    "lobby": "10.10.10.54",
+    "vanilla": "10.10.10.56",
+}
 # The node's disks as `/dev/disk/by-id` lists them; the data disk's entry names the node.
 BY_ID = {
-    "plugins": "scsi-0QEMU_QEMU_HARDDISK_drive-scsi0\nscsi-0QEMU_QEMU_HARDDISK_plugins\n",
-    "lobby": "scsi-0QEMU_QEMU_HARDDISK_drive-scsi0\nscsi-0QEMU_QEMU_HARDDISK_lobby\n",
+    node: f"scsi-0QEMU_QEMU_HARDDISK_drive-scsi0\nscsi-0QEMU_QEMU_HARDDISK_{node}\n"
+    for node in SSH_HOSTNAMES
 }
 
 
@@ -194,6 +198,42 @@ def test_a_partition_table_with_no_filesystem_is_refused_not_formatted():
     with pytest.raises(SystemExit) as refused:
         deploy_ops("plugins", blkid=blkid)
     assert "partition-table" in str(refused.value) and "not xfs" in str(refused.value)
+
+
+def test_the_reboot_timer_is_the_last_thing_the_deploy_does():
+    """`Persistent=true` with no stamp makes the first elapse due immediately, so a deploy
+    that installed the timer before its firewall/verify steps could be rebooted mid-run."""
+    ops = commands(deploy_ops("plugins"))
+    enabled = next(i for i, c in enumerate(ops) if "enable --now fleet-reboot.timer" in c)
+    assert enabled == len(ops) - 1, ops[enabled + 1 :]
+
+
+def test_the_deploy_proves_the_gate_before_it_can_fire():
+    """A gate that only ever runs from the timer is unproven until it reboots something."""
+    ops = commands(deploy_ops("plugins"))
+    dry = next(i for i, c in enumerate(ops) if "reboot-gate.py --dry-run" in c)
+    enabled = next(i for i, c in enumerate(ops) if "enable --now fleet-reboot.timer" in c)
+    assert dry < enabled, ops
+
+
+def test_the_mounted_device_must_be_the_one_the_unit_names():
+    """The unit file can be rewritten while the active mount stays on the old device: the
+    deploy would report success and the node would come back on the wrong disk at next boot."""
+    check = next(
+        c for c in commands(deploy_ops("plugins")) if "findmnt -no SOURCE /srv/plugins/data" in c
+    )
+    assert f'[ "$src" = "{DATA_DEV}" ]' in check, check
+
+
+def test_a_node_without_opanel_closes_the_port_its_old_image_opened():
+    """lobby runs papermc now; OPanel's 3000/tcp rule survived the image change and nothing
+    listens on it, so the deploy takes it back out. vanilla still runs fabric + OPanel."""
+    papermc = commands(deploy_ops("plugins"))
+    assert any("--remove-port=3000/tcp" in c for c in papermc), papermc
+    assert not any("--add-port=3000/tcp" in c for c in papermc), papermc
+    fabric = commands(deploy_ops("vanilla"))
+    assert any("--add-port=3000/tcp" in c for c in fabric), fabric
+    assert not any("--remove-port=3000/tcp" in c for c in fabric), fabric
 
 
 def test_the_deploy_asserts_the_mount_is_active_before_it_starts_the_container():

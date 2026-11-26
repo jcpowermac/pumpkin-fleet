@@ -44,9 +44,14 @@ out=$(HOME="$home" PATH="$bin:$PATH" bash "$CREATE" --render-only 2>&1); code=$?
 [ -s "$work/calls.log" ] && fail "--render-only contacted pve3: $(cat "$work/calls.log")"
 
 # The channel split, per node: three follow the promoted tag, the canary node the canary tag.
+# The node list comes from the script's own NODES array, so adding a node cannot leave a
+# hardcoded count behind asserting the wrong thing.
+node_names=$(sed -n 's/^  "${VMID_[A-Z]*}:\([a-z]*\):.*/\1/p' "$CREATE")
+[ -n "$node_names" ] || fail "could not read the node list out of $CREATE"
 lines=$(grep -h "rpm-ostree rebase" "$REPO"/build/nodes/*.butane)
-[ "$(wc -l <<<"$lines")" -eq 4 ] || fail "expected four rebase lines, got: $lines"
-for n in lobby plugins vanilla neoforge; do
+[ "$(wc -l <<<"$lines")" -eq "$(wc -w <<<"$node_names")" ] \
+  || fail "expected one rebase line per node ($(wc -w <<<"$node_names")), got: $lines"
+for n in $node_names; do
   # The .ign is what pve3 is handed; a render that produced no ignition is not a render.
   [ -s "$REPO/build/nodes/$n.ign" ] || fail "$n produced no ignition (build/nodes/$n.ign is empty)"
 done

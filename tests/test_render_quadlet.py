@@ -189,6 +189,8 @@ def test_verify_unit_is_a_oneshot_after_the_container_and_reads_the_log_as_core(
     _, text = render_quadlet.render_verify_units("lobby", "papermc", "/srv/lobby/data")
     assert "Type=oneshot" in text
     assert "After=lobby.service" in text
+    # ...and said out loud to be inert, so the next reader does not trust it for ordering.
+    assert "# No effect" in text
     assert (
         "ExecStart=/usr/bin/python3 /usr/local/lib/fleet/verify-plugins.py "
         "--image papermc --data-dir /srv/lobby/data --container lobby" in text
