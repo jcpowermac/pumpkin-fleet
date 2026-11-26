@@ -264,6 +264,8 @@ _push(
     dest=f"/etc/fleet/expected-plugins.{image_name}.txt",
     sudo=True,
 )
+# Created here because this is the first thing written into it; the reboot window comes last.
+server.shell(name=f"Create {render_quadlet.FLEET_LIB}", commands=f"mkdir -p {render_quadlet.FLEET_LIB}", _sudo=True)
 _push(
     name="Install verify-plugins.py",
     text=(REPO / "scripts" / "fleet" / "verify-plugins.py").read_text(),
@@ -360,7 +362,6 @@ server.shell(
 _reboot_timer, _reboot_service = render_quadlet.render_reboot_units(
     node, render_quadlet.pin("REBOOT_ONCALENDAR")
 )
-server.shell(name=f"Create {render_quadlet.FLEET_LIB}", commands=f"mkdir -p {render_quadlet.FLEET_LIB}", _sudo=True)
 _push(
     name="Install mc-ping.py (the reboot gate's probe)",
     text=(REPO / "scripts" / "mc-ping.py").read_text(),

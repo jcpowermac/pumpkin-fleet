@@ -200,6 +200,17 @@ def test_a_partition_table_with_no_filesystem_is_refused_not_formatted():
     assert "partition-table" in str(refused.value) and "not xfs" in str(refused.value)
 
 
+def test_the_fleet_lib_exists_before_anything_is_written_into_it():
+    """The reboot window is the last block now, so its `mkdir -p /usr/local/lib/fleet` cannot
+    be what creates the directory the plugin check writes verify-plugins.py into: `tee` into a
+    missing directory fails a fresh node's first deploy."""
+    ops = commands(deploy_ops("plugins"))
+    mkdir = next(i for i, c in enumerate(ops) if "mkdir -p /usr/local/lib/fleet" in c)
+    pushes = [i for i, c in enumerate(ops) if "/usr/local/lib/fleet" in c and "base64 -d" in c]
+    assert pushes, ops
+    assert mkdir < min(pushes), ops
+
+
 def test_the_reboot_timer_is_the_last_thing_the_deploy_does():
     """`Persistent=true` with no stamp makes the first elapse due immediately, so a deploy
     that installed the timer before its firewall/verify steps could be rebooted mid-run."""
