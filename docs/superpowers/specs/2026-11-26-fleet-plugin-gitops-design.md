@@ -228,8 +228,13 @@ OPanel entry already used. Not a second file: two places declaring the same jars
 - `install_as` is load-bearing, not cosmetics. Upstream filenames carry versions (`LuckPerms-Bukkit-5.5.71.jar`), so a
   new bundle never name-matches the jar already sitting in `/data/plugins` and Paper ends up loading **both** copies.
   Every jar is renamed to a canonical name at build time, and the entrypoint records what the image ships in a stamp
-  file `/data/plugins/.fleet-plugins` (one canonical name per line). Removal is a stamp diff, not pattern matching: a
-  name the stamp recorded and the current image no longer ships gets deleted; anything never in the stamp is untouched.
+  file `/data/plugins/.fleet-plugins` (one canonical name per line). Convergence is a stamp diff, not pattern matching, and
+  **for a name the fleet ships, the image is authoritative**: a bundled canonical name absent from the data dir is
+  copied; a bundled canonical name present with different bytes is replaced by the bundled build; a name the stamp
+  recorded that the image no longer bundles is deleted; anything never in the stamp is untouched. Replacement is
+  mandatory, not optional — canonical names are stable across releases, so "seed if absent, delete what is no longer
+  bundled" would never upgrade anything, and a bump PR would change the image while every existing volume kept the old
+  jar forever. To pin a custom build, ship it under a name the fleet does not use.
   This is the one deliberate exception to "the volume always wins", scoped to names the fleet itself shipped.
 - **How they get into the image:** `ADD --checksum` cannot express a variable-length list and accepts sha256 only,
   which half the upstreams do not publish. So a `plugins` build stage takes the whole list as a single build arg (JSON)

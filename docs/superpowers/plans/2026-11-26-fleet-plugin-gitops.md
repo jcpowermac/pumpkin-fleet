@@ -20,16 +20,17 @@
 - No GitHub Actions runner may reach `10.10.10.0/24`; nothing in CI SSHes to a node.
 - Server MC version pinned at **26.3** (protocol 777). Paper `26.3-258`, Fabric loader `0.20.1`, NeoForge `26.3.0.115`.
 - Images keep base `eclipse-temurin:25-jre-ubi10-minimal` (glibc) and run as uid/gid `1000` with `/data` as the volume; container flags follow `containers/README.md` "Running one".
-- "The volume always wins" stays the rule; the only exception is deleting a jar whose name is in the fleet stamp `/data/plugins/.fleet-plugins` (spec §5).
+- "The volume always wins" stays the rule; the only exception is the set of names the fleet itself ships, recorded in the stamp `/data/plugins/.fleet-plugins` (spec §5). Within that set the image is authoritative: absent is copied, mismatched is replaced, unbundled is deleted. A name the fleet never shipped is never touched.
 - OS channel `ghcr.io/jcpowermac/pumpkin-os:stable`; BlueBuild publishes only `:latest`, so `latest` is the canary OS channel and `stable` moves by an explicit promote (spec §4).
 - Legacy LXCs 100–107 are **untouchable** (no reads, copies, or stops). LXC 150 (authentik) belongs to this fleet and stays in scope.
-- No node deploy runs between Task 1 and Task 10: after Task 1 the version tags name images CI has not built yet.
+- No node deploy runs before Task 7, and from Task 7 until Task 10 deploys are limited to the canary node **202 `plugins`** — Tasks 1–6 leave the version tags naming images CI has not built yet, and `:stable` does not exist until a promote.
 
 ## Review Focus
 
 Each line is a failure mode the spec implies but no task's happy path exercises. Each gets its test in the task named.
 
 1. **Same plugin, two names on an existing volume** — a data dir already holding `LuckPerms-Bukkit-5.5.71.jar` next to a new canonical `LuckPerms.jar` must end up with exactly one copy. (Task 3)
+1. **A bumped plugin must actually reach an existing volume** — a volume holding an older `LuckPerms.jar` converges to the build the new image ships. (Task 3)
 2. **A jar that downloads fine but fails to load** (unmet dependency, wrong MC build) must be reported by the node, not hidden by a container that is "running". (Task 8)
 3. **Reboot window landing while players are online** must skip the reboot and say so. (Task 7)
 4. **Promoting a `stable` that does not match the built digest** must abort, not move `stable` to something unbuilt. (Task 4)
@@ -53,7 +54,7 @@ Each line is a failure mode the spec implies but no task's happy path exercises.
 - Consumes: nothing.
 - Produces: manifest shape every later task reads. Image object: `name`, `version`, `args`, `plugins` (list). Plugin seed entry (this task's shape): `name`, `slug`, `source` ∈ `hangar|modrinth|github|manual`, `mc` (list of MC version strings), `install_as` (canonical jar name). Task 2 fills `version`, `url`, `sha256`, `deps`, `note`.
 
-Seed manifest values (exact): `papermc` version `26.3-258-p1` with plugins `LuckPerms` (slug `luckperms`, source `modrinth`, `install_as: LuckPerms.jar`) and `ViaVersion` (slug `viaversion`, source `hangar`, `install_as: ViaVersion.jar`). `fabric` version `26.3-0.20.1-p1` with plugins `fabric-api` (slug `FabricMC/fabric`, source `github`, `install_as: fabric-api.jar`), `opanel` (slug `opanel-mc/opanel`, source `github`, `install_as: opanel-fabric.jar`), `LuckPerms` (slug `luckperms`, source `modrinth`, `install_as: LuckPerms.jar`) — which replaces the `FABRIC_API` / `OPANEL_VERSION` / `OPANEL_ASSET` args and the two `ADD` lines in `containers/fabric/Dockerfile`, so one mechanism carries every bundled jar. `neoforge` and `velocity` get `"plugins": []`. No `EssentialsX` (no 26.3-compatible release) and no `Vault` (no scriptable source) — both named in a `"excluded"` note on the `papermc` entry so a reader knows they were considered.
+Seed manifest values (exact): `papermc` version `26.3-258-p1` with plugins `LuckPerms` (slug `luckperms`, source `modrinth`, `install_as: LuckPerms.jar`) and `ViaVersion` (slug `viaversion`, source `hangar`, `install_as: ViaVersion.jar`). `fabric` version `26.3-0.20.1-p1` with plugins `fabric-api` (slug `FabricMC/fabric-api`, source `github`, `install_as: fabric-api.jar`), `opanel` (slug `opanel-mc/opanel`, source `github`, `install_as: opanel-fabric.jar`), `LuckPerms` (slug `luckperms`, source `modrinth`, `install_as: LuckPerms.jar`). `neoforge` and `velocity` get `"plugins": []`. No `EssentialsX` (no 26.3-compatible release) and no `Vault` (no scriptable source) — both named in a `"excluded"` note on the `papermc` entry so a reader knows they were considered. **Task 1 changes only `images.json` for fabric:** `containers/fabric/Dockerfile` keeps its `FABRIC_API` / `OPANEL_VERSION` / `OPANEL_ASSET` args and its two `ADD` lines until Task 3 replaces them with the plugin stage, so the fabric image is never built missing the mods its loader refuses to start without.
 
 - [ ] **Step 1: Write the failing test** in `tests/test_manifest.py`
 
@@ -72,7 +73,7 @@ Expected: FAIL — 4 of 5 fail against the current manifest (pumpkin present, pl
 
 - [ ] **Step 3: Rewrite `containers/images.json`** to the shape and values above, and delete `containers/pumpkin/`.
 
-- [ ] **Step 4: Update `tasks/gameserver.py`** — `"lobby": ("papermc", "4g", "2G")` in `WORKLOADS`, delete the OPanel install block and the `_desired` pin hash term that reads `opanel['sha256']`; keep the firewalld rule for 3000/tcp keyed on any plugin whose `name == "opanel"` (OPanel's web panel listens on 3000).
+- [ ] **Step 4: Update `tasks/gameserver.py`** — `"lobby": ("papermc", "4g", "2G")` in `WORKLOADS`, delete the OPanel install block; leave the `_desired` pin expression alone (Task 7 deletes that whole mechanism) and keep the firewalld rule for 3000/tcp keyed on any plugin whose `name == "opanel"` (OPanel's web panel listens on 3000). With `lobby` on `papermc`, the 3000 rule must key on the manifest of the node's image, not on a leftover OPanel entry.
 
 - [ ] **Step 5: Reword the base-image comments and `README.md`** so they justify glibc/UBI without citing the deleted image. No base change.
 
@@ -100,7 +101,7 @@ git commit -m "feat: declare plugins in images.json; drop the pumpkin image"
 **Interfaces:**
 - Consumes: Task 1's plugin seed entries.
 - Produces: `Plugin` dataclass with `name, slug, source, version, url, sha256, install_as, mc, deps, note, stale`; `fetch_json(url: str) -> Any`; `sha256_of_url(url: str, dest: Path) -> str`; `resolve_hangar(p: Plugin, mc: str) -> Plugin`; `resolve_modrinth(p: Plugin, mc: str, loader: str) -> Plugin`; `resolve_github(p: Plugin) -> Plugin`; `resolve_manual(p: Plugin) -> Plugin`; `expand_hangar_deps(p: Plugin) -> list[Plugin]`; `resolve_manifest(manifest: list[dict], image: dict) -> list[dict]`.
-- CLI: `--check` (exit 2 when any plugin has a newer compatible release, manifest unchanged), `--bump` (rewrites `containers/images.json` in place, bumps the image's `-pN` revision when the plugin set changed), `--only <image>`, `--dry-run` (print the PR body to stdout, write nothing).
+- CLI: `--check` (exit 2 when any plugin has a newer compatible release, manifest unchanged), `--bump` (rewrites `containers/images.json` in place, bumping the image's `-pN` revision when a plugin artifact identity — `version`, `url` or `sha256` — changed), `--only <image>`, `--dry-run` (print the PR body to stdout, write nothing).
 
 Endpoints (exact): Hangar `GET https://hangar.papermc.io/api/v1/projects/{slug}/versions?platform=PAPER&platformVersion={mc}&channel=Release&limit=10`, sha256 from `downloads[<platform>].fileInfo.sha256Hash`, dependencies from `pluginDependencies[].projectId` → `GET /api/v1/projects/{id}`; Modrinth `GET https://api.modrinth.com/v2/project/{slug}/version`, filtered client-side by `game_versions` overlap and `loaders`, header `User-Agent: pumpkin-fleet-bumpbot/1.0 (+https://github.com/jcpowermac/pumpkin-fleet)`; GitHub `GET https://api.github.com/repos/{slug}/releases/latest` with `Accept: application/vnd.github+json`.
 
@@ -150,12 +151,13 @@ git commit -m "feat: resolve plugin versions, sha256s and dependency closures"
 - Create: `containers/lib/plugin-seed.sh` (shared by both entrypoints)
 - Modify: `containers/papermc/Dockerfile`, `containers/papermc/entrypoint.sh`
 - Modify: `containers/fabric/Dockerfile`, `containers/fabric/entrypoint.sh`
+- Modify: `.github/workflows/containers.yml` (pass `PLUGIN_TRIPLETS` for every image)
 - Create: `tests/test_plugin_seed.sh`
 
 **Interfaces:**
 - Consumes: Task 1/2 plugin entries (`url`, `install_as`, `sha256`).
 - Produces: build arg `PLUGIN_TRIPLETS` — one space-separated list of `url install_as sha256` triples; image dirs `/opt/plugins` (papermc) and `/opt/bundled-mods` (fabric); `/opt/lib/plugin-seed.sh` exposing `seed_plugins <bundled_dir> <data_dir> <stamp_name>`; data-dir stamp `<data_dir>/.fleet-plugins`, one canonical jar name per line.
-- `seed_plugins` behaviour, in order: (1) delete a data-dir jar whose sha256 equals a bundled jar's sha256 but whose name differs; (2) copy a bundled jar when its canonical name is absent from the data dir; (3) delete a name recorded in the old stamp that the image no longer bundles, and touch nothing never recorded; (4) rewrite the stamp from the bundled set.
+- `seed_plugins` behaviour, in order: (1) delete a data-dir jar whose sha256 equals a bundled jar's sha256 but whose name differs; (2) copy a bundled jar when its canonical name is absent from the data dir; (3) replace a data-dir jar whose name the image bundles but whose sha256 differs from the bundled jar; (4) delete a name recorded in the old stamp that the image no longer bundles; (5) touch nothing the stamp never recorded; (6) rewrite the stamp from the bundled set.
 
 - [ ] **Step 1: Write the failing test** `tests/test_plugin_seed.sh`
 
@@ -163,7 +165,7 @@ git commit -m "feat: resolve plugin versions, sha256s and dependency closures"
 # mktemp dir; fake bundled jars + fake data jars; source containers/lib/plugin-seed.sh
 # assert, with messages:
 #   first_seed_copies_all_canonical_and_writes_stamp
-#   volume_wins: a data jar with the same name but different bytes is NOT overwritten
+#   image_wins_for_a_bundled_name: a data jar with a bundled name but different bytes IS replaced
 #   removal: stamp had Vault.jar, bundle lacks it -> deleted; untracked Extra.jar -> untouched
 #   dedupe: data/LuckPerms-Bukkit-5.5.71.jar identical to bundled LuckPerms.jar -> removed, canonical kept
 #   stamp_after: equals the sorted bundled canonical names
@@ -189,6 +191,8 @@ RUN set -eu; mkdir -p /opt/plugins; cd /opt/plugins; \
 ```
 
 then in the final stage `COPY --from=plugins /opt/plugins /opt/plugins`, `COPY lib/plugin-seed.sh /opt/lib/plugin-seed.sh`, `RUN chown -R 1000:1000 /opt/plugins /opt/lib` (fabric: `/opt/bundled-mods`, and delete the two `ADD` lines plus `FABRIC_API` / `OPANEL_VERSION` / `OPANEL_ASSET` args). `shortcut: URLs must contain no whitespace (all four CDNs satisfy); upgrade to a TSV build arg if a source needs a signed query string.`
+
+- [ ] **Step 4b: Pass the build arg from CI in the same task** — extend the existing `args` step in `.github/workflows/containers.yml` with `PLUGIN_TRIPLETS=$(jq -r '.[] | select(.name=="<image>") | .plugins[]? | "\(.url) \(.install_as) \(.sha256)"' containers/images.json | paste -sd' ' -)`, and make the plugins stage **fail when an image declares plugins but the arg is empty** (a silent empty `/opt/plugins` would ship a server with no plugins while the manifest claims them). `velocity` and `neoforge` legitimately pass an empty arg.
 
 - [ ] **Step 5: Seed in the entrypoints** — `papermc/entrypoint.sh` calls `seed_plugins /opt/plugins /data/plugins fleet-plugins` before `exec java`; `fabric/entrypoint.sh` replaces its inline bundled-mod loop with `seed_plugins /opt/bundled-mods /data/mods fleet-mods`.
 
@@ -230,7 +234,7 @@ def test_p_revision_bump_with_plugin_change_is_allowed()
 
 - [ ] **Step 4: Run tests to verify they pass** — expected PASS.
 
-- [ ] **Step 5: Wire the workflow** — in `.github/workflows/containers.yml`: `actions/checkout@v4` with `fetch-depth: 2` and a gate step writing `git show HEAD^:containers/images.json > /tmp/base.json` then `uv run python scripts/ci_gate.py --base /tmp/base.json --head containers/images.json` (skip the gate on `workflow_dispatch`); add the `PLUGIN_TRIPLETS` build arg to the existing `args` step (`jq` over `matrix.image.plugins`); add `:${matrix.image.version}` **and** `:stable-next` to `tags`. Add a `promote` job, `if: github.event_name == 'workflow_dispatch'`, inputs `image` and `digest`: log in, `docker pull <prefix>/<image>:stable-next`, refuse unless `docker inspect --format '{{index .RepoDigests 0}}'` ends with the input digest, then tag and push `:stable`.
+- [ ] **Step 5: Wire the workflow** — in `.github/workflows/containers.yml`: `actions/checkout@v4` with `fetch-depth: 2` and a gate step writing `git show HEAD^:containers/images.json > /tmp/base.json` then `uv run python scripts/ci_gate.py --base /tmp/base.json --head containers/images.json` (skip the gate on `workflow_dispatch`); add `:${matrix.image.version}` **and** `:stable-next` to `tags` (Task 3 already added the `PLUGIN_TRIPLETS` build arg). Add a `promote` job, `if: github.event_name == 'workflow_dispatch'`, inputs `image` and `digest`: log in, `docker pull <prefix>/<image>:stable-next`, refuse unless `docker inspect --format '{{index .RepoDigests 0}}'` ends with the input digest, then tag and push `:stable`.
 
 - [ ] **Step 6: Verify locally before pushing**
 
