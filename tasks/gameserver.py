@@ -4,7 +4,8 @@ The unit is the desired state and podman is the reconciler: `AutoUpdate=registry
 podman's own timer converge the node on whatever the channel tag points at, so a new
 image arrives without an ssh session. Channels and the reboot window come from
 configs/pins.env; the canary node (by name) follows the pre-promotion channel. Data dir
-is bind-mounted at /data (seeded once by the entrypoint, survives OS rebases).
+is bind-mounted at /data and lives on the host-owned zvol (scsi1), so it survives both an
+OS rebase and a destroy/recreate of the VM.
 
 Usage: uv run pyinfra inventory/hosts.py --limit lobby tasks/gameserver.py
 """
@@ -15,11 +16,14 @@ import sys
 from pathlib import Path
 
 from pyinfra import host
+from pyinfra.facts.server import Command
 from pyinfra.operations import files, server
 
 REPO = Path(__file__).resolve().parent.parent
 # scripts/ holds plain scripts, not a package; pyinfra runs this from tasks/.
 sys.path.insert(0, str(REPO / "scripts"))
+sys.path.insert(0, str(REPO / "scripts" / "fleet"))
+import mount  # noqa: E402
 import render_quadlet  # noqa: E402
 
 # Same module the node runs, so the expected-jar list is written by the code that reads it.
@@ -65,6 +69,68 @@ unit = f"~/.config/containers/systemd/{node}.container"
 # the user lingers (logind tears down user@N and its container scopes).
 server.shell(name="Enable linger for the service user", commands="loginctl enable-linger core", _sudo=True)
 files.directory(path=data_dir, _sudo=True)
+
+# --- the world disk --------------------------------------------------------
+# data_dir must be the host-owned zvol (scsi1), never a directory on the disposable OS
+# disk: a rebuild re-imports scsi0, and a world written there goes with it. The device is
+# resolved from the node's own /dev/disk/by-id entries (the deploy refuses rather than
+# guess), and formatting is allowed only on a device that carries no filesystem at all.
+data_unit = f"srv-{node}-data.mount"
+device = mount.data_device(
+    node,
+    host.get_fact(Command, command="ls -1 /dev/disk/by-id") or "",
+    render_quadlet.pin("FLEET_DATA_DEV"),
+)
+blkid = host.get_fact(Command, command=f"sudo blkid -o export {device} || true") or ""
+_push(
+    name=f"Install the {node} data mount unit",
+    text=mount.mount_unit(node, device),
+    dest=f"/etc/systemd/system/{data_unit}",
+    sudo=True,
+)
+# Written before anything else uses it: 25-migrate-data.sh reads the device from this unit.
+# A non-empty data_dir that is not a mountpoint is a world still on the OS disk (the
+# pre-zvol layout). Mounting the unused zvol over it would hide that world and the server
+# would start on an empty one, so the deploy stops and names the migration step.
+server.shell(
+    name=f"Check {data_dir} is not an unmigrated world",
+    commands=(
+        f"mountpoint -q {data_dir} && exit 0; "
+        f'if [ -n "$(ls -A {data_dir})" ]; then '
+        f"echo '{data_dir} holds data but is not mounted — run scripts/fleet/25-migrate-data.sh {node} first'; "
+        "exit 1; fi"
+    ),
+)
+if mount.needs_format(blkid):
+    # mkfs.xfs (no -f) refuses a device that already carries a filesystem; the test -b
+    # means a missing device fails here instead of becoming an empty world directory.
+    server.shell(
+        name=f"Format {device} with XFS (first attach only)",
+        commands=f"test -b {device} && sudo mkfs.xfs {device}",
+        _sudo=True,
+    )
+elif mount.filesystem_of(blkid) != "xfs":
+    # Something already lives on that device. XFS is the fleet's own; anything else is
+    # someone's data and a deploy is no reason to reformat it.
+    raise SystemExit(
+        f"{device} carries {mount.filesystem_of(blkid)}, not xfs — refusing to format over it"
+    )
+server.shell(
+    name=f"Mount {data_dir} from {device}",
+    commands=f"systemctl daemon-reload && systemctl enable --now {data_unit}",
+    _sudo=True,
+)
+# The check that makes Review Focus 6 real: an unmounted volume leaves a plain directory on
+# the OS disk, and the container would happily write a world into it.
+server.shell(
+    name=f"{data_dir} is the mounted data volume",
+    commands=(
+        f"mountpoint -q {data_dir} || "
+        f"{{ echo '{data_dir} is not a mountpoint — refusing to write a world onto the OS disk'; "
+        f"findmnt -T {data_dir}; exit 1; }}"
+    ),
+)
+
 # files.directory above creates it root-owned, and inside `podman unshare` uid 0 IS
 # `core`, so a namespace chown of a root-owned dir is EPERM. Hand the directory
 # itself to core first (not -R: the contents keep their container ownership).

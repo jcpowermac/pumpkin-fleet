@@ -31,14 +31,18 @@ SSHKEY="$(cat "$CORE_SSH_PUB_KEY_FILE")"
 command -v butane >/dev/null || { echo "butane not found" >&2; exit 1; }
 
 # sssd bind credential lives in CT 150 (/root/ldap-user-password, "<user> <pass>"); fetch it
-# rather than duplicating it here. Render-only skips it: that read is a pve3 call.
+# rather than duplicating it here. Render-only skips it: that read is a pve3 call. A node
+# booted with an empty bind dn joins no domain and cockpit/sssd fail at login, so an
+# unreadable 150 stops the rebuild here instead of producing four of them.
 if ((RENDER_ONLY)); then
   SSSD_BIND_USER=""; SSSD_BIND_AUTHTOK=""
 else
-  SSSD_BIND="$(ssh "$PVE_HOST" pct exec 150 -- cut -d' ' -f1,2 /root/ldap-user-password | tr -d '\n')"
+  SSSD_BIND="$(ssh "$PVE_HOST" pct exec 150 -- cut -d' ' -f1,2 /root/ldap-user-password | tr -d '\n')" \
+    || { echo "authentik LXC 150 unreadable — sssd bind credential unavailable" >&2; exit 1; }
   SSSD_BIND_USER="${SSSD_BIND%% *}"
   SSSD_BIND_AUTHTOK="${SSSD_BIND##* }"
-  [[ "$SSSD_BIND_USER" != "$SSSD_BIND_AUTHTOK" ]] || { echo "SSSD bind credential not parsed" >&2; exit 1; }
+  [[ -n "$SSSD_BIND_USER" && "$SSSD_BIND_USER" != "$SSSD_BIND_AUTHTOK" ]] \
+    || { echo "authentik LXC 150 unreadable — sssd bind credential unavailable" >&2; exit 1; }
 fi
 
 NODES=(
@@ -59,6 +63,10 @@ done
   || { echo "CANARY_NODE=$CANARY_NODE matches no node in this list (lobby plugins vanilla neoforge)" >&2; exit 1; }
 
 mkdir -p build/nodes
+# The snippet dir is spike-era state no tracked step created: on a fresh host every
+# `cicustom` below would point at a file that is not there. After the CANARY_NODE check,
+# so a typo still fails before anything is written to the host.
+((RENDER_ONLY)) || ssh "$PVE_HOST" mkdir -p /var/coreos/snippets
 for entry in "${NODES[@]}"; do
   IFS=: read -r vmid name ip <<<"$entry"
   # The OS channel, per node: the canary node (by name) follows the canary tag BlueBuild
@@ -84,6 +92,10 @@ IMG=/tmp/ucore-spike-fcos-${FCOS_BUILD}.qcow2
 if qm status \$VMID >/dev/null 2>&1; then
   echo "   \$VMID exists — destroying"
   qm stop \$VMID 2>/dev/null || true
+  # --purge takes what PVE created (scsi0 in pool). The world is scsi1, a zvol the host
+  # owns (pool/mcdata/${name}), so it survives qm destroy --purge and 15-ensure-data-disks.sh
+  # reattaches it below — verified on pve3 with a throwaway VMID
+  # (docs/superpowers/specs/2026-11-26-fleet-plugin-gitops-design.md §2b).
   qm destroy \$VMID --purge
 fi
 qm create \$VMID --name ${name} --cores ${SPIKE_CORES} --memory ${SPIKE_MEM_MB} --cpu host \\
@@ -104,5 +116,8 @@ done
 if ((RENDER_ONLY)); then
   echo "OK: ${#NODES[@]} nodes rendered to build/nodes/ (no pve3 contact, no sssd bind credential)"
 else
+  # After every VM exists: scsi1 is attached on every create, and a world already on
+  # pool/mcdata/<node> comes back with the newly imported OS disk.
+  bash "$ROOT/scripts/fleet/15-ensure-data-disks.sh"
   echo "OK: ${#NODES[@]} nodes created; each rebases on first boot (~5-10 min)"
 fi

@@ -1,0 +1,13 @@
+{
+  "_note": "Recorded live 2026-11-26 from raw.githubusercontent.com/coreos/fedora-coreos-streams/main/streams/stable.json, trimmed to the field FCOS_BUILD=auto reads: the build id of the current stable proxmoxve artifact.",
+  "stream": "stable",
+  "architectures": {
+    "x86_64": {
+      "artifacts": {
+        "proxmoxve": {
+          "release": "45.20261030.3.1"
+        }
+      }
+    }
+  }
+}
