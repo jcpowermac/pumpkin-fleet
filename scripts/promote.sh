@@ -12,15 +12,23 @@
 # pull/tag/push: the daemon would re-push the single-platform manifest for the OCI index
 # ghcr stored, so stable would land on a different digest than the one just verified.
 #
-# env: PREFIX  ghcr.io/<owner>/<repo>, as the workflow's prefix step lowercases it
+# env: PREFIX  ghcr.io/<owner>[/<repo>], as the workflow's prefix step lowercases it
 #      IMAGE   images.json image name
 #      DIGEST  sha256:<64 hex> or bare 64 hex
 #      GITHUB_TOKEN  optional: ghcr serves a public package anonymously
+#      EXPECTED_TAG  optional: accept only this tag's digest. The OS promote is "whatever
+#                    pumpkin-os:latest carries, or nothing": BlueBuild publishes dated build
+#                    tags beside latest (20261126, 20261126-45, …), so the any-published-tag
+#                    rule would also accept a stale dated build — or :stable's own digest,
+#                    which is a no-op reported as a promotion.
+#                    Ruling 4a's rollback-by-older-version-tag stays available to the server
+#                    images, which call this script without EXPECTED_TAG.
 set -euo pipefail
 
 image="${IMAGE:-}"
 digest="${DIGEST:-}"
 prefix="${PREFIX:-}"
+expected_tag="${EXPECTED_TAG:-}"
 digest="${digest#sha256:}"
 
 if ! [[ "$image" =~ ^[a-z0-9-]+$ ]]; then
@@ -52,6 +60,7 @@ tags=$(curl -fsS -H "Authorization: Bearer $token" "$api/tags/list" | jq -r '.ta
 
 matched=""
 for tag in $tags; do
+  [[ -z "$expected_tag" || "$tag" == "$expected_tag" ]] || continue
   headers=$(curl -fsSI -H "Authorization: Bearer $token" -H "Accept: $accept" "$api/manifests/$tag" | tr -d '\r') \
     || { echo "could not read the digest of $repo/$image:$tag" >&2; continue; }
   if [[ "$(grep -im1 '^docker-content-digest:' <<<"$headers" | cut -d' ' -f2)" == "sha256:$digest" ]]; then
@@ -61,7 +70,11 @@ for tag in $tags; do
 done
 
 if [[ -z "$matched" ]]; then
-  echo "refusing: sha256:$digest matches no published tag of $repo/$image — stable only moves to a digest CI built" >&2
+  if [[ -n "$expected_tag" ]]; then
+    echo "refusing: sha256:$digest is not the digest of $repo/$image:$expected_tag — stable only moves to what the canary channel runs" >&2
+  else
+    echo "refusing: sha256:$digest matches no published tag of $repo/$image — stable only moves to a digest CI built" >&2
+  fi
   exit 1
 fi
 echo "sha256:$digest is published as $repo/$image:$matched; moving $repo/$image:stable to it"

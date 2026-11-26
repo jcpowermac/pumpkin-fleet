@@ -34,6 +34,9 @@ modules:
         # Already in uCore; listed explicitly so a base-image change cannot silently
         # drop the guest agent that qm agent and the fleet's IP checks rely on.
         - qemu-guest-agent
+        # The node-side fleet scripts (reboot gate, plugin verification) run on python3,
+        # and neither FCOS nor uCore guarantees it in the base.
+        - python3
 
   # NOTE: no sshd drop-in and no `Include` patch here, and that is deliberate. uCore
   # already ships /etc/ssh/sshd_config.d/90-enable-localhost-passwords.conf:

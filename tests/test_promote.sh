@@ -71,9 +71,9 @@ echo "docker $*" >> "$DOCKER_LOG"
 EOF
 chmod +x "$bin/curl" "$bin/docker"
 
-run() { # run <image> <digest> [stub-mode] ; echoes the promote output, sets $code
+run() { # run <image> <digest> [stub-mode] [expected-tag] ; echoes the promote output, sets $code
   : > "$work/docker.log"
-  out=$(PATH="$bin:$PATH" DOCKER_LOG="$work/docker.log" STUB_MODE="${3:-ok}" \
+  out=$(PATH="$bin:$PATH" DOCKER_LOG="$work/docker.log" STUB_MODE="${3:-ok}" EXPECTED_TAG="${4:-}" \
         PREFIX=ghcr.io/jcpowermac/pumpkin-fleet IMAGE="$1" DIGEST="$2" GITHUB_TOKEN=fake \
         bash "$PROMOTE" 2>&1)
   code=$?
@@ -130,5 +130,21 @@ case "$out" in *"could not list the published tags of jcpowermac/pumpkin-fleet/p
   (*) fail "tags/list failure was not named: $out" ;;
 esac
 [ -s "$work/docker.log" ] && fail "a failed tags/list still reached the retag: $log"
+
+# EXPECTED_TAG is the OS channel's shape: only the named tag's digest moves stable. B is what
+# stable-next carries, so the forward promote works; A is an older published tag, so the call
+# that is a rollback without EXPECTED_TAG is a refusal with it — pumpkin-os carries dated build
+# tags beside :latest, and a digest :stable itself carries must not read as a promotion.
+run papermc "$B" ok stable-next
+[ "$code" -eq 0 ] || fail "the expected tag's digest was refused: $out"
+case "$log" in *"--tag ghcr.io/jcpowermac/pumpkin-fleet/papermc:stable"*) ;;
+  (*) fail "expected-tag promote did not retag stable: $log" ;;
+esac
+run papermc "$A" ok stable-next
+[ "$code" -ne 0 ] || fail "EXPECTED_TAG accepted a digest stable-next does not carry: $out"
+[ -s "$work/docker.log" ] && fail "a digest outside the expected tag still retagged stable: $log"
+case "$out" in *"not the digest of jcpowermac/pumpkin-fleet/papermc:stable-next"*) ;;
+  (*) fail "refusal did not name the expected tag: $out" ;;
+esac
 
 echo "OK: promote accepts any published digest (including a rollback) and refuses the rest"

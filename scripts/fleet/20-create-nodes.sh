@@ -9,20 +9,37 @@
 # genuine first boot, which is the documented path and the one that already works.
 #
 # Each node's Ignition does: static IP -> uCore rebase (--bypass-driver) -> reboot.
+#
+# --render-only: render every node's butane/Ignition into build/nodes/ and stop before any
+# pve3 contact — no ssh/scp, no qm, and no sssd bind credential fetch. That render is for
+# review/diff only (its sssd bind fields come out empty), which is what makes a node rebuild
+# reviewable without a host key. tests/test_create_nodes_render.sh proves the offline half.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 set -a; source configs/pins.env; set +a
 
+RENDER_ONLY=0
+for arg in "$@"; do
+  case "$arg" in
+    --render-only) RENDER_ONLY=1 ;;
+    *) echo "usage: ${0##*/} [--render-only]" >&2; exit 2 ;;
+  esac
+done
+
 SSHKEY="$(cat "$CORE_SSH_PUB_KEY_FILE")"
 command -v butane >/dev/null || { echo "butane not found" >&2; exit 1; }
 
 # sssd bind credential lives in CT 150 (/root/ldap-user-password, "<user> <pass>"); fetch it
-# rather than duplicating it here.
-SSSD_BIND="$(ssh "$PVE_HOST" pct exec 150 -- cut -d' ' -f1,2 /root/ldap-user-password | tr -d '\n')"
-SSSD_BIND_USER="${SSSD_BIND%% *}"
-SSSD_BIND_AUTHTOK="${SSSD_BIND##* }"
-[[ "$SSSD_BIND_USER" != "$SSSD_BIND_AUTHTOK" ]] || { echo "SSSD bind credential not parsed" >&2; exit 1; }
+# rather than duplicating it here. Render-only skips it: that read is a pve3 call.
+if ((RENDER_ONLY)); then
+  SSSD_BIND_USER=""; SSSD_BIND_AUTHTOK=""
+else
+  SSSD_BIND="$(ssh "$PVE_HOST" pct exec 150 -- cut -d' ' -f1,2 /root/ldap-user-password | tr -d '\n')"
+  SSSD_BIND_USER="${SSSD_BIND%% *}"
+  SSSD_BIND_AUTHTOK="${SSSD_BIND##* }"
+  [[ "$SSSD_BIND_USER" != "$SSSD_BIND_AUTHTOK" ]] || { echo "SSSD bind credential not parsed" >&2; exit 1; }
+fi
 
 NODES=(
   "${VMID_LOBBY}:lobby:${IP_LOBBY}"
@@ -34,15 +51,19 @@ NODES=(
 mkdir -p build/nodes
 for entry in "${NODES[@]}"; do
   IFS=: read -r vmid name ip <<<"$entry"
-  echo "== ${vmid} ${name} ${ip}"
+  # The OS channel, per node: the canary node (by name) follows the canary tag BlueBuild
+  # publishes, every other node the promoted one.
+  if [[ "$name" == "$CANARY_NODE" ]]; then os_tag="$OS_TAG_CANARY"; else os_tag="$OS_TAG"; fi
+  echo "== ${vmid} ${name} ${ip} ${OS_IMAGE}:${os_tag}"
 
   SPIKE_HOSTNAME="$name" SPIKE_IP4="$ip/24" FLEET_GW="$FLEET_GW" \
-  UCORE_IMAGE="$UCORE_IMAGE" UCORE_TAG="$UCORE_TAG" CORE_SSH_PUB_KEY="$SSHKEY" \
+  UCORE_IMAGE="$OS_IMAGE" UCORE_TAG="$os_tag" CORE_SSH_PUB_KEY="$SSHKEY" \
   IP_AUTHENTIK="$IP_AUTHENTIK" SSSD_BIND_USER="$SSSD_BIND_USER" SSSD_BIND_AUTHTOK="$SSSD_BIND_AUTHTOK" \
   envsubst '${SPIKE_HOSTNAME} ${SPIKE_IP4} ${FLEET_GW} ${UCORE_IMAGE} ${UCORE_TAG} ${CORE_SSH_PUB_KEY} ${IP_AUTHENTIK} ${SSSD_BIND_USER} ${SSSD_BIND_AUTHTOK}' \
     < templates/fleet.ign.butane > "build/nodes/${name}.butane"
   butane -r "build/nodes/${name}.butane" > "build/nodes/${name}.ign"
   python3 -m json.tool "build/nodes/${name}.ign" >/dev/null
+  if ((RENDER_ONLY)); then continue; fi
   scp -q "build/nodes/${name}.ign" "${PVE_HOST}:/var/coreos/snippets/${name}.ign"
 
   ssh "$PVE_HOST" bash -s <<EOF
@@ -70,4 +91,8 @@ echo "   \$VMID started"
 EOF
 done
 
-echo "OK: ${#NODES[@]} nodes created; each rebases on first boot (~5-10 min)"
+if ((RENDER_ONLY)); then
+  echo "OK: ${#NODES[@]} nodes rendered to build/nodes/ (no pve3 contact, no sssd bind credential)"
+else
+  echo "OK: ${#NODES[@]} nodes created; each rebases on first boot (~5-10 min)"
+fi
