@@ -121,3 +121,13 @@ def test_every_dockerfile_copy_source_exists_at_the_context_root():
             if line.startswith("COPY ") and "--from=" not in line:
                 src = [t for t in line.split() if not t.startswith("--")][0]
                 assert (repo / src).exists(), f"{dockerfile}: {src} is not in the build context"
+
+
+def test_the_test_net_runs_for_any_change_not_only_an_image_change():
+    """`tests` is the repo's only test net, and it used to trigger only on containers/**: a PR
+    that changed the resolver, the gate or a fleet script merged with its own guards unrun. An
+    unchanged manifest yields an empty matrix, so widening the paths costs no builds."""
+    text = _text()
+    triggers = text[: text.index("jobs:")]
+    for path in ("containers/**", "scripts/**", "tasks/**", "tests/**", "docs/**"):
+        assert path in triggers, triggers

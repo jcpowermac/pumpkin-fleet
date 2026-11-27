@@ -33,10 +33,26 @@ on:
     branches: [main]
     paths:
       - 'containers/**'
+      - 'scripts/**'
+      - 'tasks/**'
+      - 'inventory/**'
+      - 'tests/**'
+      - 'docs/**'
+      - 'configs/pins.env'
+      - 'pyproject.toml'
+      - 'uv.lock'
       - '.github/workflows/containers.yml'
   pull_request:
     paths:
       - 'containers/**'
+      - 'scripts/**'
+      - 'tasks/**'
+      - 'inventory/**'
+      - 'tests/**'
+      - 'docs/**'
+      - 'configs/pins.env'
+      - 'pyproject.toml'
+      - 'uv.lock'
       - '.github/workflows/containers.yml'
   workflow_dispatch:
     inputs:
