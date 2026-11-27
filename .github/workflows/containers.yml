@@ -92,7 +92,9 @@ jobs:
 
       - id: gate
         env:
-          BASE: ${{ github.event.before || github.event.pull_request.base.sha }}
+          # A `synchronize` PR event carries `before` = the PR's *previous* head, not main, so
+          # keying on it diffs the last two commits of the branch and finds nothing changed.
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           FORCE: ${{ github.event.inputs.image }}
         run: |
           git show "${BASE:-HEAD^}:containers/images.json" > /tmp/base.json
@@ -110,7 +112,10 @@ jobs:
     # A dispatch with a digest is a promote run: rebuilding here would re-push the version tag
     # the merge already published with a new revision label, and move stable-next onto bytes
     # nobody reviewed. An image-only dispatch (no digest) is still the force-rebuild lever.
-    if: github.event_name != 'workflow_dispatch' || github.event.inputs.digest == ''
+    # An empty matrix is not a passing build either: a change that touches no image entry
+    # (a tests-only PR) legitimately builds nothing, and GitHub otherwise fails the run for a
+    # job with no variants.
+    if: needs.matrix.outputs.images != '[]' && (github.event_name != 'workflow_dispatch' || github.event.inputs.digest == '')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

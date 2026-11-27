@@ -28,9 +28,25 @@ def test_a_promote_dispatch_does_not_rebuild():
     with a new revision label and moves stable-next to bytes nobody canaried — in the same run
     that promotes stable to the old digest."""
     build = _job("build")
-    assert "if: github.event_name != 'workflow_dispatch' || github.event.inputs.digest == ''" in build
+    assert "(github.event_name != 'workflow_dispatch' || github.event.inputs.digest == '')" in build
     # The image input is the force-rebuild lever, not the promote selector.
     assert "github.event.inputs.image != ''" not in build
+
+
+def test_the_gate_diffs_against_main_on_a_pull_request():
+    """A `synchronize` PR event carries `before` = the PR's previous head. Keying the gate on it
+    diffs the branch's last two commits, finds no manifest change, and the build job vanishes
+    into an empty matrix — which is how a PR that changes two images built nothing."""
+    gate = _job("matrix")
+    assert "BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha "
+           "|| github.event.before }}" in gate, gate
+
+
+def test_an_empty_matrix_does_not_create_a_build_job():
+    """A change that touches no image entry legitimately builds nothing; GitHub otherwise fails
+    the run for a matrix job with no variants, which reads as a broken build."""
+    build = _job("build")
+    assert "needs.matrix.outputs.images != '[]'" in build, build
 
 
 def test_an_image_only_dispatch_still_forces_a_build():
