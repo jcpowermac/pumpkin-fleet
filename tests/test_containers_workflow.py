@@ -38,8 +38,9 @@ def test_the_gate_diffs_against_main_on_a_pull_request():
     diffs the branch's last two commits, finds no manifest change, and the build job vanishes
     into an empty matrix — which is how a PR that changes two images built nothing."""
     gate = _job("matrix")
-    assert "BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha "
-           "|| github.event.before }}" in gate, gate
+    base_line = ("BASE: ${{ github.event_name == 'pull_request'"
+                 " && github.event.pull_request.base.sha || github.event.before }}")
+    assert base_line in gate, gate
 
 
 def test_an_empty_matrix_does_not_create_a_build_job():
