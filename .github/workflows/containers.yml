@@ -155,10 +155,12 @@ jobs:
         with:
           # One context for all four: the plugin seed script lives in containers/lib,
           # outside any single image directory.
-          context: containers
-          # `dockerfile` is relative to the context, so the extra `containers/` here made
-          # buildx look for containers/containers/<image>/Dockerfile and fail to solve.
-          dockerfile: ${{ matrix.image.name }}/Dockerfile
+          # `file` is the input name (`dockerfile:` is silently ignored, and the build then looks
+          # for containers/Dockerfile). The context is the repo root so the Dockerfile path means
+          # the same thing from the workspace and from the context, and every COPY source is
+          # root-relative — the two things a context of `containers` made ambiguous.
+          context: .
+          file: containers/${{ matrix.image.name }}/Dockerfile
           build-args: ${{ steps.args.outputs.args }}
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}

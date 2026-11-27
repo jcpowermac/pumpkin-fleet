@@ -59,8 +59,8 @@ COPY --from=install /opt/fabric /opt/fabric
 # /opt/plugins -> /opt/bundled-mods: the loader looks in mods/, and the entrypoint
 # seeds from there into /data/mods.
 COPY --from=plugins /opt/plugins /opt/bundled-mods
-COPY lib/plugin-seed.sh /opt/lib/plugin-seed.sh
-COPY fabric/entrypoint.sh /opt/entrypoint.sh
+COPY containers/lib/plugin-seed.sh /opt/lib/plugin-seed.sh
+COPY containers/fabric/entrypoint.sh /opt/entrypoint.sh
 
 # UBI minimal ships no uid 1000, so it can be claimed directly, and no
 # /usr/sbin/nologin either — hence /bin/false.

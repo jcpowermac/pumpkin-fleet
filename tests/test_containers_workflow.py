@@ -102,15 +102,22 @@ def test_no_latest_tag_is_pushed_for_a_server_image():
 
 
 def test_the_build_context_and_the_dockerfile_path_agree():
-    """`dockerfile` is relative to the build context: `containers/<image>/Dockerfile` made buildx
-    look for containers/containers/<image>/Dockerfile, so every image failed to solve. The
-    Dockerfiles show what the context really is — they COPY `lib/...` and `<image>/entrypoint.sh`."""
+    """Two ways this broke in CI, both silent until a build ran: `dockerfile:` is not an input of
+    docker/build-push-action (the input is `file`, so the key was ignored and buildx looked for
+    containers/Dockerfile), and a context narrower than the Dockerfile's location makes every COPY
+    source ambiguous. A root context with root-relative COPY paths has no such ambiguity."""
     build = _job("build")
-    assert "context: containers" in build, build
-    assert "dockerfile: ${{ matrix.image.name }}/Dockerfile" in build, build
+    assert "context: ." in build, build
+    assert "file: containers/${{ matrix.image.name }}/Dockerfile" in build, build
+    assert not [l for l in build.splitlines() if l.strip().startswith("dockerfile:")], build
+
+
+def test_every_dockerfile_copy_source_exists_at_the_context_root():
+    """A COPY path that does not resolve is a build failure in CI and nothing else: the offline
+    suite never runs docker, so this is the only place it can be caught before a push."""
     repo = WORKFLOW.parents[1]
-    for dockerfile in (repo / "containers").glob("*/Dockerfile"):
+    for dockerfile in sorted((repo / "containers").glob("*/Dockerfile")):
         for line in dockerfile.read_text().splitlines():
             if line.startswith("COPY ") and "--from=" not in line:
-                src = [t for t in line.split() if not t.startswith("--")][-2]
-                assert not src.startswith("containers/"), f"{dockerfile}: {line}"
+                src = [t for t in line.split() if not t.startswith("--")][0]
+                assert (repo / src).exists(), f"{dockerfile}: {src} is not in the build context"

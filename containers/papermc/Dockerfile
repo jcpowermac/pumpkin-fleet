@@ -34,8 +34,8 @@ ADD --chmod=0644 --checksum=sha256:${PAPER_SHA256} \
     /opt/paper.jar
 
 COPY --from=plugins /opt/plugins /opt/plugins
-COPY lib/plugin-seed.sh /opt/lib/plugin-seed.sh
-COPY papermc/entrypoint.sh /opt/entrypoint.sh
+COPY containers/lib/plugin-seed.sh /opt/lib/plugin-seed.sh
+COPY containers/papermc/entrypoint.sh /opt/entrypoint.sh
 # UBI minimal ships no uid 1000, so it can be claimed directly, and no
 # /usr/sbin/nologin either — hence /bin/false.
 RUN chmod 0755 /opt/entrypoint.sh \

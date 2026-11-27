@@ -1,0 +1,5 @@
+.git
+.superpowers
+**/__pycache__
+*.pyc
+pyinfra-debug.log
