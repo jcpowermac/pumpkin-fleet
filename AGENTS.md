@@ -7,6 +7,9 @@ LXCs. Access: `ssh root@172.31.12.99` (key-based); `pct exec <vmid>` for LXCs,
 
 ## Read first
 
+- `docs/operations.md` — **the operator guide**: fleet table, infrastructure and state diagrams
+  (Mermaid), day-2 runbooks, command reference, what the tooling refuses to do. Start here for
+  anything that is a *how do I* question.
 - `docs/superpowers/specs/2026-11-26-fleet-plugin-gitops-design.md` — the current fleet design
   (container images, `stable`/`stable-next` channels, the data zvol, the bump bot), with its plan
   in `docs/superpowers/plans/2026-11-26-fleet-plugin-gitops.md`. Newer than `docs/plan.md` where

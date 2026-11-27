@@ -2,9 +2,13 @@
 
 Deterministic provisioning for the Minecraft fleet on pve3.
 
-- **Plan:** `docs/plan.md` (copy of the deployment plan; authority lives in
-  `~/Development/minecraft-server/docs/superpowers/plans/2026-11-21-pumpkin-fleet-deploy.md`)
-- **Spec:** `~/Development/minecraft-server/docs/superpowers/specs/2026-11-21-pumpkin-fleet-lxc-pyinfra-design.html`
+- **Operator guide:** `docs/operations.md` — fleet table, infrastructure + state diagrams, day-2
+  runbooks (deploy, verify, bump a plugin, promote, roll back, migrate a world, rebuild a node),
+  command reference. Start here for a *how do I* question.
+- **Design spec:** `docs/superpowers/specs/2026-11-26-fleet-plugin-gitops-design.md` (images,
+  channels, data zvols, bump bot) with its plan in
+  `docs/superpowers/plans/2026-11-26-fleet-plugin-gitops.md`.
+- **Plan (older, checkbox-tracked):** `docs/plan.md` — superseded by the spec above where they disagree.
 - **Spike notes / hard-won knowledge:** `docs/spike-notes.md` ← **read this before touching uCore**
 
 ## Current state
@@ -14,6 +18,7 @@ Game nodes are uCore (FCOS-based, immutable) KVM VMs. Infra nodes are LXC.
 | VMID | Name | IP | What |
 |---|---|---|---|
 | 190 | `ucore-golden` | — | PVE template. **Reference image — do not clone it** (see spike notes §5) |
+| 150 | `authentik` (LXC) | 10.10.10.53 | identity: LDAP logins for node ssh and Cockpit |
 | 201 | `lobby` | 10.10.10.54 | uCore, Cockpit :9090, QGA |
 | 202 | `plugins` | 10.10.10.55 | uCore, Cockpit :9090, QGA |
 | 203 | `vanilla` | 10.10.10.56 | uCore, Cockpit :9090, QGA |
@@ -27,15 +32,19 @@ Actions and pulled from ghcr.io — see `containers/README.md`.
 
 | Path | What |
 |---|---|
-| `configs/pins.env` | Every pinned value in the fleet (IPs, VMIDs, image tags, PVE host). Single source; scripts `source` it. |
+| `docs/operations.md` | The operator guide: diagrams, runbooks, command reference. |
+| `configs/pins.env` | Every pinned value in the fleet (IPs, VMIDs, image tags, channels, reboot window, data device, PVE host). Single source; scripts `source` it. |
 | `containers/` | `images.json` (server versions + sha256 pins + the plugins each image carries) and one Dockerfile per image: `papermc`, `fabric`, `velocity`, `neoforge`. Built in CI. |
-| `.github/workflows/` | `containers.yml` — builds all four images and pushes versioned tags to ghcr.io. |
+| `recipes/fleet.yml` | BlueBuild recipe for the node OS image (`ghcr.io/jcpowermac/pumpkin-os`: uCore + sssd + python3). |
+| `.github/workflows/` | `containers.yml` builds/pushes the four images and is the only thing that moves a server channel; `os.yml` builds the OS image daily and is the only thing that moves `pumpkin-os:stable`; `bump-plugins.yml` opens the weekly plugin bump PR. |
+| `scripts/fleet/` | The node lifecycle: `15-ensure-data-disks.sh` (world zvol + `scsi1`), `20-create-nodes.sh` (create/recreate the VMs), `25-migrate-data.sh` (move a world onto the zvol), `mount.py`, `10-make-template.sh`. |
+| `scripts/` | `resolve_plugins.py` (plugin resolution + pins), `ci_gate.py` (what may be published), `promote.sh` (channel moves), `render_quadlet.py` (node units), `fleet/reboot-gate.py` + `fleet/verify-plugins.py` (run on the node), `mc-ping.py`. |
 | `templates/fleet.ign.butane` | Per-node Ignition (envsubst → butane → ignition). Sets hostname + static IP, rebases to uCore, reboots, then enables Cockpit + QGA. |
-| `scripts/fleet/` | Build the game nodes. `20-create-nodes.sh` is the real one. |
 | `scripts/spike/` | The Task 1 spike, end to end. `30-create-vm.sh` builds one golden VM; `50-verify.sh` is non-destructive. |
-| `inventory/`, `tasks/` | pyinfra: OS-level configuration (Task 2+). |
+| `inventory/`, `tasks/` | pyinfra: OS-level configuration and the deploy/verify applicator (`tasks/gameserver.py`, `tasks/verify.py`). |
 | `build/` | Gitignored working dir (downloads, rendered ignition, generated pve3 scripts). |
-| `docs/` | Plan, `spike-notes.md`, and this README's references. |
+| `tests/` | The offline suite: resolver, gate, manifests, quadlet/mount/render, node scripts against a simulated pve3, workflow text rules. No docker, no network, no pve3. |
+| `docs/` | Operator guide, plan, `spike-notes.md`, and the specs/plans this repo implements. |
 
 ## Conventions (determinism rules)
 
