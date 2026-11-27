@@ -140,6 +140,10 @@ class Pve:
         _stub(self.bin, "ssh", PVE_STUB)
         # The rebuild pushes one Ignition per node; a real scp here would reach 172.31.12.99.
         _stub(self.bin, "scp", '#!/usr/bin/env bash\necho "scp $*" >> "$PVE_CALLS"\n')
+        # `butane` is a host tool, not a repo dependency: without it the script refuses before
+        # it reaches anything these tests are about, so CI (which has no butane) fails 7 tests.
+        _stub(self.bin, "butane", '#!/usr/bin/env bash\n' +
+              'printf \'{"version": "2.0.0", "stub": true}\\n\'\n')
         self.write_state(
             {
                 "datasets": [],
