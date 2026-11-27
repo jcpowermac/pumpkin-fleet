@@ -37,6 +37,12 @@ def _stub(bin_dir: Path, name: str, text: str) -> Path:
     return path
 
 
+# `butane` is a host tool, not a repo dependency, and 20-create-nodes.sh refuses without it
+# before it reaches anything these tests are about — so CI (no butane) fails them all. The
+# tests care that an .ign is produced per node, not that it is valid Ignition.
+BUTANE_STUB = '#!/usr/bin/env bash\nprintf \'{"version": "2.0.0", "stub": true}\\n\'\n'
+
+
 def _env(**extra: str) -> dict:
     env = dict(os.environ)
     env.pop("FLEET_SRV_ROOT", None)
@@ -140,10 +146,7 @@ class Pve:
         _stub(self.bin, "ssh", PVE_STUB)
         # The rebuild pushes one Ignition per node; a real scp here would reach 172.31.12.99.
         _stub(self.bin, "scp", '#!/usr/bin/env bash\necho "scp $*" >> "$PVE_CALLS"\n')
-        # `butane` is a host tool, not a repo dependency: without it the script refuses before
-        # it reaches anything these tests are about, so CI (which has no butane) fails 7 tests.
-        _stub(self.bin, "butane", '#!/usr/bin/env bash\n' +
-              'printf \'{"version": "2.0.0", "stub": true}\\n\'\n')
+        _stub(self.bin, "butane", BUTANE_STUB)
         self.write_state(
             {
                 "datasets": [],
@@ -745,6 +748,7 @@ def test_create_nodes_names_the_missing_sssd_credential(tmp_path):
     bin_dir = work / "bin"
     bin_dir.mkdir()
     _stub(bin_dir, "ssh", "#!/usr/bin/env bash\nexit 255\n")
+    _stub(bin_dir, "butane", BUTANE_STUB)
     env = _env(HOME=str(home), PATH=f"{bin_dir}:{os.environ['PATH']}")
     result = subprocess.run(
         ["bash", str(REPO / "scripts" / "fleet" / "20-create-nodes.sh")],
