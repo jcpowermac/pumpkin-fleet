@@ -156,7 +156,9 @@ jobs:
           # One context for all four: the plugin seed script lives in containers/lib,
           # outside any single image directory.
           context: containers
-          dockerfile: containers/${{ matrix.image.name }}/Dockerfile
+          # `dockerfile` is relative to the context, so the extra `containers/` here made
+          # buildx look for containers/containers/<image>/Dockerfile and fail to solve.
+          dockerfile: ${{ matrix.image.name }}/Dockerfile
           build-args: ${{ steps.args.outputs.args }}
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}

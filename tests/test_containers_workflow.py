@@ -99,3 +99,18 @@ def test_no_latest_tag_is_pushed_for_a_server_image():
     text = _text()
     tags = text[text.index("tags: |"):text.index("labels: |")]
     assert "latest" not in tags
+
+
+def test_the_build_context_and_the_dockerfile_path_agree():
+    """`dockerfile` is relative to the build context: `containers/<image>/Dockerfile` made buildx
+    look for containers/containers/<image>/Dockerfile, so every image failed to solve. The
+    Dockerfiles show what the context really is — they COPY `lib/...` and `<image>/entrypoint.sh`."""
+    build = _job("build")
+    assert "context: containers" in build, build
+    assert "dockerfile: ${{ matrix.image.name }}/Dockerfile" in build, build
+    repo = WORKFLOW.parents[1]
+    for dockerfile in (repo / "containers").glob("*/Dockerfile"):
+        for line in dockerfile.read_text().splitlines():
+            if line.startswith("COPY ") and "--from=" not in line:
+                src = [t for t in line.split() if not t.startswith("--")][-2]
+                assert not src.startswith("containers/"), f"{dockerfile}: {line}"
