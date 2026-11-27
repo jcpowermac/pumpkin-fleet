@@ -181,11 +181,15 @@ runs again on every boot. After the first run the rebase is a no-op and the rebo
 **Fix:** guard at the top of the post-rebase branch:
 
 ```sh
-if rpm-ostree status --booted 2>/dev/null | grep -q 'ublue-os/ucore'; then
+if rpm-ostree status --booted 2>/dev/null | grep -q "${UCORE_IMAGE}"; then
   systemctl enable --now cockpit.service qemu-guest-agent.service 2>/dev/null || true
   exit 0
 fi
 ```
+
+The image name must come from `${UCORE_IMAGE}`, not be hardcoded: a node already booted on the
+fleet image that greps for `ublue-os/ucore` never matches, rebases to the same ref and reboots
+forever (§14 records the loop; `templates/fleet.ign.butane:79` is the guarded form).
 
 ---
 
@@ -282,8 +286,9 @@ it (image + Ignition + import per machine) and each step is boring and repeatabl
 
 Built by `.github/workflows/os.yml` from `recipes/fleet.yml`, following
 `github.com/jcpowermac/os`. Published as **`ghcr.io/jcpowermac/pumpkin-os`**
-(tags: `latest`, `45`, `<sha>-45`, `<date>-45`), public — anonymous pull, no
-credentials on the nodes.
+(tags: `latest`, `stable`, `45`, `<sha>-45`, `<date>-45`), public — anonymous pull, no
+credentials on the nodes. BlueBuild writes everything but `stable`; `promote-os` is the only
+thing that moves `stable`, which is the tag the production nodes follow.
 
 **Why an image instead of `rpm-ostree install sssd`:** layering is per-node drift.
 One recipe is answerable from git.
@@ -335,9 +340,13 @@ and a permission failure is not evidence of absence.**
 
 ```sh
 sudo rpm-ostree rebase --bypass-driver \
-  ostree-unverified-registry:ghcr.io/jcpowermac/pumpkin-os:latest
+  ostree-unverified-registry:ghcr.io/jcpowermac/pumpkin-os:stable
 sudo systemctl reboot
 ```
+
+`:stable` is the tag the production nodes follow (`OS_TAG` in `configs/pins.env`); `:latest` is
+the canary's channel (`OS_TAG_CANARY`, node 202 only) and a hand-rebase onto it puts a production
+node on the daily unreviewed build.
 
 **`rpm-ostree` no-ops when the ref string is unchanged** (`error: Old and new refs are
 equal`). To pick up a new build of the same tag, rebase by digest:
@@ -349,11 +358,11 @@ ostree-unverified-registry:ghcr.io/jcpowermac/pumpkin-os@sha256:<digest>
 ### HAZARD: `fleet-provision` will revert a pumpkin-os node
 
 `templates/fleet.ign.butane`'s guard is
-`rpm-ostree status --booted | grep -q 'ublue-os/ucore'`. A node booted on
-`ghcr.io/jcpowermac/pumpkin-os` does **not** match, so the unit would rebase it back to
-uCore and reboot — a loop. Nodes must have `fleet-provision` disabled before rebasing
-(done on 201), and the guard needs widening to `ublue-os/ucore|pumpkin-os` before new
-nodes are created against this image.
+`rpm-ostree status --booted | grep -q "${UCORE_IMAGE}"`. It used to hardcode `ublue-os/ucore`,
+and this is why it no longer does: a node booted on `ghcr.io/jcpowermac/pumpkin-os` did **not**
+match the old name, so the unit would rebase it back to uCore and reboot — a loop. Matching on the
+image the node is being rendered to rebase onto is right for the spike base and for the fleet
+image. Nodes rebased by hand still need `fleet-provision` disabled first (done on 201).
 
 ---
 
@@ -402,7 +411,11 @@ exists:
 4. **firewalld (FedoraServer zone) drops the game port.** uCore enables firewalld
    with only ssh/cockpit open; the port bind lands on the host interface and is
    dropped. Fix: `firewall-cmd --add-port=25565/tcp --permanent && reload`.
-   Does not survive an OSTree rebase — revisit for Task 7 Step 3.
+   **Survives an OSTree rebase** — verified on 201 after the uCore → `pumpkin-os`
+   rebase: `firewall-cmd --list-ports` still shows `25565/tcp 3000/tcp`, and the polkit,
+   sudoers and sssd drop-ins are all there. rpm-ostree persists locally added `/etc`
+   drop-ins; only state *inside* a file the base image also ships can be rewritten by its
+   three-way /etc merge (`FedoraServer.xml.old`).
 5. **The game container runs as `core`, so cockpit only shows it in a PRIVILEGED
    session.** Rootless podman puts it in core's store
    (`/run/user/1000/podman/podman.sock`); jcallen (uid 2007) has an empty store of his
@@ -442,8 +455,47 @@ exists:
         http://d/v5.0.0/libpod/containers/json?all=true
    ```
 
+6. **A `podman run` container blocks the quadlet unit that replaces it.** Quadlet's
+   `ContainerName=<node>` is the name the old deploy used, so `systemctl --user start
+   <node>.service` fails ("container name already in use") until the old one is gone. And
+   `podman rm -f` is not the way to remove it: it SIGKILLs the JVM and a loaded world loses
+   whatever it had not flushed. `tasks/gameserver.py` therefore hands it over with
+   `podman stop --time 60` — the same grace the unit's `--stop-timeout` gives — and only when
+   `<node>.service` is not already active, so the handover happens once and a redeploy never
+   touches a container the unit owns.
+
 **Verifying a server is really up:** `scripts/mc-ping.py <ip> 25565` does a real
 protocol-777 status ping (varint framing; the server never acks the handshake — it
 waits straight for the status request; status response is
 `[packet id][string len][JSON]`). A plain TCP connect is not enough: pasta accepts
 the SYN before it's proven it forwards.
+
+## 17. Host-owned data disks: the disk a destroy must not reach
+
+The fleet's rebuild path treats `scsi0` as disposable and keeps the world on a
+**host-owned ZFS volume** attached as `scsi1` (`zfs create -V <size> pool/mcdata/<node>`
++ `qm set <vmid> --scsi1 /dev/zvol/pool/mcdata/<node>`). Two facts that decided it:
+
+1. **A host-owned zvol survives `qm destroy --purge`.** Probed with a throwaway VMID (299):
+   create `pool/test-mcdata`, attach it as `/dev/zvol/pool/test-mcdata`, `qm destroy 299 --purge`
+   → the VM, its `scsi0` and its cloud-init drive are gone, `zfs list` still shows the zvol.
+   `--purge` only removes storage *owned by the VM* (`vm-<id>-disk-N`); a host device is left
+   alone. Symptom if you get this backwards: a destroy-and-recreate of a node deletes the world.
+2. **PVE's own zvols are VM-owned and do not survive.** Today every node disk is
+   `pool:vm-201-disk-0`-style (`qm config 201`), so the existing disks are exactly the kind
+   `--purge` deletes — which is why the data disk has to be created outside the VM.
+
+Consequences that the scripts now encode: `15-ensure-data-disks.sh` never destroys or
+detaches, and refuses when an existing `scsi1` points somewhere else; `needs_format` is true
+only for a device with no filesystem at all, so a non-XFS device makes the deploy refuse rather
+than `mkfs` over a world; and migrating a node's old `/srv/<node>/data` moves the original tree
+aside to `data.pre-zvol` instead of deleting it. The in-guest `/dev/disk/by-id` name for a host
+zvol is still unverified on these nodes — until it is pinned, `data_device` falls back to
+`FLEET_DATA_DEV` and fails loudly rather than mounting the first disk it finds.
+
+**Unverified: hot-plug visibility.** The rebuild order runs `qm create` + `qm start` per node and
+only then `15-ensure-data-disks.sh`, so `scsi1` is hot-added to a VM that is already running.
+Whether the guest then sees the device (and its `/dev/disk/by-id` entry) without a reboot is
+**unverified**. Symptom if it does not: the deploy's format step fails on `test -b <device>`.
+The fix is `qm shutdown <vmid>` + `qm start <vmid>` for that node — never a different device.
+

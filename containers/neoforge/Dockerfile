@@ -28,7 +28,7 @@ ARG NEOFORGE_VERSION
 ENV NEOFORGE_VERSION=${NEOFORGE_VERSION}
 
 COPY --from=install /opt/neoforge /opt/neoforge
-COPY entrypoint.sh /opt/entrypoint.sh
+COPY containers/neoforge/entrypoint.sh /opt/entrypoint.sh
 
 # UBI minimal ships no uid 1000, so it can be claimed directly.
 RUN chmod 0755 /opt/entrypoint.sh \

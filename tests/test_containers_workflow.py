@@ -1,0 +1,133 @@
+"""The containers workflow is the only thing that publishes a server image or moves a channel.
+
+Pinned as text, the way `os.yml` is, because a run log does not show either rule until it has
+already broken: a promote dispatch must not rebuild (a rebuild re-pushes a published version tag
+and moves `stable-next` onto bytes no human reviewed), and a merge must not publish before the
+repo's own tests have run.
+"""
+from pathlib import Path
+
+WORKFLOW = Path(__file__).resolve().parent.parent / ".github/workflows/containers.yml"
+JOBS = ("tests", "matrix", "build", "promote")
+
+
+def _text():
+    return WORKFLOW.read_text()
+
+
+def _job(name):
+    text = _text()
+    start = text.index(f"  {name}:")
+    later = [text.index(f"  {other}:") for other in JOBS
+             if text.index(f"  {other}:") > start]
+    return text[start:min(later, default=len(text))]
+
+
+def test_a_promote_dispatch_does_not_rebuild():
+    """A digest dispatch is a promote run. Rebuilding here re-pushes the published version tag
+    with a new revision label and moves stable-next to bytes nobody canaried — in the same run
+    that promotes stable to the old digest."""
+    build = _job("build")
+    assert "(github.event_name != 'workflow_dispatch' || github.event.inputs.digest == '')" in build
+    # The image input is the force-rebuild lever, not the promote selector.
+    assert "github.event.inputs.image != ''" not in build
+
+
+def test_the_gate_diffs_against_main_on_a_pull_request():
+    """A `synchronize` PR event carries `before` = the PR's previous head. Keying the gate on it
+    diffs the branch's last two commits, finds no manifest change, and the build job vanishes
+    into an empty matrix — which is how a PR that changes two images built nothing."""
+    gate = _job("matrix")
+    base_line = ("BASE: ${{ github.event_name == 'pull_request'"
+                 " && github.event.pull_request.base.sha || github.event.before }}")
+    assert base_line in gate, gate
+
+
+def test_an_empty_matrix_does_not_create_a_build_job():
+    """A change that touches no image entry legitimately builds nothing; GitHub otherwise fails
+    the run for a matrix job with no variants, which reads as a broken build."""
+    build = _job("build")
+    assert "needs.matrix.outputs.images != '[]'" in build, build
+
+
+def test_an_image_only_dispatch_still_forces_a_build():
+    """Ruling 4b: the force lever is an image with no digest. It is what rebuilds after a
+    Dockerfile-only fix — and the only dispatch that reaches the build job."""
+    text = _text()
+    assert "FORCE: ${{ github.event.inputs.image }}" in text
+    assert "--force-image" in text
+    assert "digest == ''" in _job("build")
+
+
+def test_the_promote_job_takes_a_digest_and_names_the_image():
+    """promote.sh refuses an empty IMAGE, so a digest-only dispatch fails at the promote step
+    rather than silently rebuilding. The guard keys on the digest, which is what selects the job."""
+    promote = _job("promote")
+    assert "if: github.event_name == 'workflow_dispatch' && github.event.inputs.digest != ''" in promote
+    assert "IMAGE: ${{ github.event.inputs.image }}" in promote
+    assert "bash scripts/promote.sh" in promote
+
+
+def test_the_tests_job_runs_the_suite_and_the_shell_checks():
+    """Nothing else in the repo runs these, and the shell suites are the only coverage the
+    seed/promote/render code has. They stub curl, podman and ssh: no fleet, no ghcr secret."""
+    tests = _job("tests")
+    assert "uv run pytest -q" in tests
+    for suite in ("tests/test_plugin_seed.sh", "tests/test_promote.sh",
+                  "tests/test_create_nodes_render.sh"):
+        assert suite in tests, f"{suite} is never run in CI"
+
+
+def test_the_build_waits_for_the_tests():
+    """A publishing job that can start before the tests is the gap this job closed."""
+    needs = next(line for line in _job("build").splitlines() if line.strip().startswith("needs:"))
+    assert "tests" in needs and "matrix" in needs, needs
+
+
+def test_uv_is_installed_before_any_job_uses_it():
+    """`uv run` with no setup step is an assumption about the runner image, not a pin."""
+    for name in JOBS:
+        job = _job(name)
+        if "uv run" not in job:
+            continue
+        assert "astral-sh/setup-uv@" in job, f"the {name} job runs uv without installing it"
+        assert job.index("astral-sh/setup-uv@") < job.index("uv run"), name
+
+
+def test_no_latest_tag_is_pushed_for_a_server_image():
+    """A deploy follows stable, never latest: latest is the OS channel only."""
+    text = _text()
+    tags = text[text.index("tags: |"):text.index("labels: |")]
+    assert "latest" not in tags
+
+
+def test_the_build_context_and_the_dockerfile_path_agree():
+    """Two ways this broke in CI, both silent until a build ran: `dockerfile:` is not an input of
+    docker/build-push-action (the input is `file`, so the key was ignored and buildx looked for
+    containers/Dockerfile), and a context narrower than the Dockerfile's location makes every COPY
+    source ambiguous. A root context with root-relative COPY paths has no such ambiguity."""
+    build = _job("build")
+    assert "context: ." in build, build
+    assert "file: containers/${{ matrix.image.name }}/Dockerfile" in build, build
+    assert not [l for l in build.splitlines() if l.strip().startswith("dockerfile:")], build
+
+
+def test_every_dockerfile_copy_source_exists_at_the_context_root():
+    """A COPY path that does not resolve is a build failure in CI and nothing else: the offline
+    suite never runs docker, so this is the only place it can be caught before a push."""
+    repo = WORKFLOW.parents[1]
+    for dockerfile in sorted((repo / "containers").glob("*/Dockerfile")):
+        for line in dockerfile.read_text().splitlines():
+            if line.startswith("COPY ") and "--from=" not in line:
+                src = [t for t in line.split() if not t.startswith("--")][0]
+                assert (repo / src).exists(), f"{dockerfile}: {src} is not in the build context"
+
+
+def test_the_test_net_runs_for_any_change_not_only_an_image_change():
+    """`tests` is the repo's only test net, and it used to trigger only on containers/**: a PR
+    that changed the resolver, the gate or a fleet script merged with its own guards unrun. An
+    unchanged manifest yields an empty matrix, so widening the paths costs no builds."""
+    text = _text()
+    triggers = text[: text.index("jobs:")]
+    for path in ("containers/**", "scripts/**", "tasks/**", "tests/**", "docs/**"):
+        assert path in triggers, triggers

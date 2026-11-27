@@ -1,0 +1,31 @@
+[12:00:00 INFO]: Starting org.bukkit.craftbukkit.Main
+[12:00:00 INFO]: System Info: Java 21 (HotSpot 64-Bit Server VM 21.0.5+11) Host: Linux 6.16.3-101.fc41.x86_64 (amd64)
+[12:00:00 INFO]: Loading properties
+[12:00:00 INFO]: This server is running Paper version 26.3-258-master@c5df5fb (2026-11-24T09:12:44Z) (Implementing API version 26.3-R0.1-SNAPSHOT)
+[12:00:01 INFO]: Server Ping Player Sample Count: 12
+[12:00:01 INFO]: Using 4 threads for Netty based IO
+[12:00:01 INFO]: Default game type: SURVIVAL
+[12:00:01 INFO]: Generating keypair
+[12:00:01 INFO]: Starting Minecraft server on *:25565
+[12:00:01 INFO]: Using epoll channel type
+[12:00:02 INFO]: Preparing level "world"
+[12:00:03 INFO]: Preparing start region for dimension minecraft:overworld
+[12:00:04 INFO]: Time elapsed: 1432 ms
+[12:00:04 INFO]: [LuckPerms] Loading server plugin LuckPerms v5.5.71
+[12:00:04 INFO]: [ViaVersion] Loading server plugin ViaVersion v5.12.3
+[12:00:04 INFO]: [ViaBackwards] Loading server plugin ViaBackwards v5.12.3
+[12:00:04 INFO]: [ViaRewind] Loading server plugin ViaRewind v4.2.0
+[12:00:05 INFO]: [LuckPerms] Enabling LuckPerms v5.5.71
+[12:00:05 INFO]: [LuckPerms]  Loading configuration...
+[12:00:05 INFO]: [LuckPerms]  Loading storage provider... [H2]
+[12:00:05 INFO]: [LuckPerms]  Loading messaging service... [MEMORY]
+[12:00:05 INFO]: [LuckPerms]  Loading internal permission manager
+[12:00:05 INFO]: [LuckPerms]  4 plugins are compatible with this server version
+[12:00:06 INFO]: [LuckPerms]  Loading 4 user(s)
+[12:00:06 INFO]: [LuckPerms]  Loading 1 group(s)
+[12:00:06 INFO]: [ViaVersion] Enabling ViaVersion v5.12.3
+[12:00:06 INFO]: [ViaVersion] ViaVersion 5.12.3 is now loaded.
+[12:00:06 INFO]: [ViaBackwards] Enabling ViaBackwards v5.12.3
+[12:00:07 INFO]: [ViaRewind] Enabling ViaRewind v4.2.0
+[12:00:07 INFO]: [ViaRewind] ViaRewind 4.2.0 is now loaded. Compatible with ViaVersion 5.12.3 and ViaBackwards 5.12.3.
+[12:00:11 INFO]: Done (7.412s)! For help, type "help"

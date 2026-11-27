@@ -1,48 +1,137 @@
 name: containers
 
-# Builds the five server images on GitHub's runners and pushes them to ghcr.io.
-# The uCore VMs never need a build toolchain or a source checkout — they pull
-# ghcr.io/<owner>/<repo>/<image>:<version> and nothing else.
+# Builds the four server images on GitHub's runners and pushes them to ghcr.io.
+# The game VMs never need a build toolchain or a source checkout — they pull
+# ghcr.io/<owner>/<repo>/<image>:<channel> and nothing else.
 #
 # Versions and sha256 pins live in containers/images.json (single source of truth),
 # which this workflow reads to build the matrix. To bump a server: edit that file,
-# open a PR, merge. The version tag changes with it, so the deploy is a one-line
-# change in configs/pins.env.
+# open a PR, merge, then promote. A deploy follows <image>:stable, so nothing else
+# needs editing.
+#
+# Two rules shape the jobs below:
+#   * scripts/ci_gate.py rejects any change that would publish different bytes under a
+#     version tag ghcr.io already has, and picks the matrix: an image whose entry did
+#     not change is skipped, so its tag is never rebuilt with a new digest.
+#   * A merge builds <image>:<version> and <image>:stable-next. Only the canary node
+#     follows stable-next; a human then dispatches with that digest, and scripts/promote.sh
+#     moves <image>:stable to it. stable/stable-next are the only moving tags.
+#
+# workflow_dispatch is the human lever, and the digest input decides which job runs:
+#   * image only  -> force that image into the matrix even though its entry did not change.
+#     This is what rebuilds after a Dockerfile-only fix. It does re-publish that image's
+#     version tag with a new digest: that is the point, and it is a human decision.
+#   * image + digest -> promote only, no build. The digest must match one of the image's
+#     published tags, so naming an older version tag's digest is the rollback the design needs
+#     — and rollback is promote-only: a merged revert would re-publish that revision, so ci_gate
+#     rejects it. Naming the version tag's own digest seeds a channel for an image whose entry
+#     never changes (velocity, neoforge) without rebuilding anything.
+#   * digest only -> no build either, and promote.sh refuses the empty image name.
 
 on:
   push:
     branches: [main]
     paths:
       - 'containers/**'
+      - 'scripts/**'
+      - 'tasks/**'
+      - 'inventory/**'
+      - 'tests/**'
+      - 'docs/**'
+      - 'configs/pins.env'
+      - 'pyproject.toml'
+      - 'uv.lock'
       - '.github/workflows/containers.yml'
   pull_request:
     paths:
       - 'containers/**'
+      - 'scripts/**'
+      - 'tasks/**'
+      - 'inventory/**'
+      - 'tests/**'
+      - 'docs/**'
+      - 'configs/pins.env'
+      - 'pyproject.toml'
+      - 'uv.lock'
       - '.github/workflows/containers.yml'
   workflow_dispatch:
+    inputs:
+      image:
+        description: image name from images.json (e.g. papermc) — force-build it, or promote it with a digest
+        required: false
+        type: string
+      digest:
+        description: sha256 digest of a tag CI published for that image (its stable-next to promote, or an older version tag to roll back to)
+        required: false
+        type: string
 
 permissions:
   contents: read
   packages: write
 
 jobs:
-  matrix:
+  # The repo's only test net: the pytest suite plus the shell suites for the seed, promote and
+  # render code. Nothing else runs them, and the build job below is what publishes tags.
+  tests:
     runs-on: ubuntu-latest
-    outputs:
-      images: ${{ steps.read.outputs.images }}
-      prefix: ${{ steps.prefix.outputs.prefix }}
     steps:
       - uses: actions/checkout@v4
 
-      - id: read
-        run: echo "images=$(jq -c . containers/images.json)" >> "$GITHUB_OUTPUT"
+      # uv syncs pytest from uv.lock, so there is no second dependency list to drift.
+      - uses: astral-sh/setup-uv@v6
+
+      - name: pytest
+        run: uv run pytest -q
+
+      # The seed and promote suites stub curl and podman, so none of this reaches ghcr.io. The
+      # render suite needs `butane`, which this runner does not have: it self-skips (exit 0)
+      # instead of downloading a binary the repo does not otherwise depend on.
+      - name: Shell suites
+        run: |
+          bash tests/test_plugin_seed.sh
+          bash tests/test_promote.sh
+          bash tests/test_create_nodes_render.sh
+
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      images: ${{ steps.gate.outputs.images }}
+      prefix: ${{ steps.prefix.outputs.prefix }}
+    steps:
+      # The gate needs the manifest at the commit being replaced, which is not always
+      # HEAD^ (a merge commit's first parent is the PR tip, not the old main).
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v6
+
+      - id: gate
+        env:
+          # A `synchronize` PR event carries `before` = the PR's *previous* head, not main, so
+          # keying on it diffs the last two commits of the branch and finds nothing changed.
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          FORCE: ${{ github.event.inputs.image }}
+        run: |
+          git show "${BASE:-HEAD^}:containers/images.json" > /tmp/base.json
+          uv run python scripts/ci_gate.py \
+            --base /tmp/base.json --head containers/images.json \
+            --matrix --force-image "$FORCE" > /tmp/matrix.json
+          echo "images=$(cat /tmp/matrix.json)" >> "$GITHUB_OUTPUT"
 
       # Docker requires a lowercase repository name; GitHub owners may not be.
       - id: prefix
         run: echo "prefix=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
   build:
-    needs: matrix
+    needs: [tests, matrix]
+    # A dispatch with a digest is a promote run: rebuilding here would re-push the version tag
+    # the merge already published with a new revision label, and move stable-next onto bytes
+    # nobody reviewed. An image-only dispatch (no digest) is still the force-rebuild lever.
+    # An empty matrix is not a passing build either: a change that touches no image entry
+    # (a tests-only PR) legitimately builds nothing, and GitHub otherwise fails the run for a
+    # job with no variants.
+    if: needs.matrix.outputs.images != '[]' && (github.event_name != 'workflow_dispatch' || github.event.inputs.digest == '')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -62,26 +151,69 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # images.json stores args as an object; docker/build-push-action wants KEY=VALUE lines.
+      # PLUGIN_TRIPLETS is the same file's plugin list flattened to
+      # `url install_as sha256` triples for the image's plugins build stage. Images with
+      # no plugins legitimately pass an empty value; the stage itself refuses an empty
+      # arg for images that declare plugins.
       - id: args
         env:
           ARGS: ${{ toJSON(matrix.image.args) }}
+          IMAGE: ${{ matrix.image.name }}
         run: |
           {
             echo 'args<<__ARGS__'
             echo "$ARGS" | jq -r 'to_entries[] | "\(.key)=\(.value)"'
+            echo "PLUGIN_TRIPLETS=$(jq -r --arg n "$IMAGE" '.[] | select(.name==$n) | .plugins[]? | "\(.url) \(.install_as) \(.sha256)"' containers/images.json | paste -sd' ' -)"
             echo '__ARGS__'
           } >> "$GITHUB_OUTPUT"
 
       - uses: docker/build-push-action@v6
         with:
-          context: containers/${{ matrix.image.name }}
+          # One context for all four: the plugin seed script lives in containers/lib,
+          # outside any single image directory.
+          # `file` is the input name (`dockerfile:` is silently ignored, and the build then looks
+          # for containers/Dockerfile). The context is the repo root so the Dockerfile path means
+          # the same thing from the workspace and from the context, and every COPY source is
+          # root-relative — the two things a context of `containers` made ambiguous.
+          context: .
+          file: containers/${{ matrix.image.name }}/Dockerfile
           build-args: ${{ steps.args.outputs.args }}
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
-          # No `latest` tag on purpose: deploys pin an exact version, so an image
-          # can never change under a running system.
-          tags: ${{ needs.matrix.outputs.prefix }}/${{ matrix.image.name }}:${{ matrix.image.version }}
+          # No `latest` tag on purpose: the version tag is what gets audited, and it is
+          # never re-pushed. stable-next is the canary channel for this same build; only a
+          # promote dispatch moves stable, which is what a deploy follows.
+          tags: |
+            ${{ needs.matrix.outputs.prefix }}/${{ matrix.image.name }}:${{ matrix.image.version }}
+            ${{ needs.matrix.outputs.prefix }}/${{ matrix.image.name }}:stable-next
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.version=${{ matrix.image.version }}
             org.opencontainers.image.revision=${{ github.sha }}
+
+  # stable is the tag every node pulls, and it moves only here. The dispatcher names a digest;
+  # scripts/promote.sh accepts it only if it is the digest ghcr.io already serves for a tag CI
+  # published of that image — stable-next for a forward promote, an older version tag for the
+  # rollback a rejected canary needs (spec §1). Rollback is promote-only; the gate is what stops
+  # a merged revert from re-publishing that revision. A digest matching none of them aborts.
+  promote:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.digest != ''
+    needs: matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote stable to a digest CI published
+        env:
+          PREFIX: ${{ needs.matrix.outputs.prefix }}
+          IMAGE: ${{ github.event.inputs.image }}
+          DIGEST: ${{ github.event.inputs.digest }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/promote.sh

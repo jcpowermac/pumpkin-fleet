@@ -13,6 +13,10 @@ import struct
 import sys
 
 PROTOCOL = 777  # Java 26.3; the version is advisory in the handshake
+# Exit 2 is "the server answered, but the payload was not a JSON object". It is a separate
+# code because exit 1 means "no answer" to scripts/fleet/reboot-gate.py, which allows the
+# reboot on silence and must NOT allow it on an answer it could not read.
+UNPARSEABLE = 2
 
 
 def varint(n: int) -> bytes:
@@ -71,11 +75,25 @@ def main() -> None:
     # body: varint packet id, then the JSON as a length-prefixed string
     _, i1 = rd_varint_from(body)        # packet id
     _, i2 = rd_varint_from(body[i1:])   # string length
-    status = json.loads(body[i1 + i2:])
-    desc = status["description"]
+    try:
+        status = json.loads(body[i1 + i2:])
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        # A server answering with bytes that are not valid UTF-8 fails *before* json can
+        # complain. That must read as "answered, untrustworthy", not "not answering".
+        status = None
+    if not isinstance(status, dict):
+        # Not an object (a list, a string, or not JSON at all): the server answered, but
+        # nothing here is trustworthy — in particular no player count.
+        print(f"mc-ping: the status payload was unparseable (not a JSON object): "
+              f"{body[i1 + i2:]!r}", file=sys.stderr)
+        sys.exit(UNPARSEABLE)
+    # .get(), not []: a status-rewriting plugin, a proxy or a version skew can answer without
+    # `description`/`version`, and a KeyError here exits 1 *before* the player count is
+    # looked at — which the reboot gate reads as "not answering, nobody is playing".
+    desc = status.get("description")
     print(json.dumps({
-        "version": status["version"],
-        "players": status["players"],
+        "version": status.get("version"),
+        "players": status.get("players"),
         "description": desc.get("text") if isinstance(desc, dict) else desc,
     }, indent=2))
 

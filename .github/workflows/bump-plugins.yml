@@ -1,0 +1,97 @@
+name: bump-plugins
+
+# The weekly bump PR: resolve the plugin pins in containers/images.json and open a PR when
+# anything moved. This is the only automated PR author in the repo, and it can do exactly
+# that much — it never merges, never approves, never touches stable, and it stages one file.
+# A human reviews and merges; the merge is what containers.yml builds and publishes from.
+#
+# The PR body is scripts/resolve_plugins.py --dry-run: per plugin the old->new version,
+# source, MC verdict, the dependencies taking it drags in and the sha256, plus a staleness
+# section for a pin whose newer upstream release will not install on the pinned MC/loader
+# (opanel ships no 26.3 fabric build, so the fabric image runs its 26.1 one).
+#
+# One bump PR at a time. If an open bot PR already carries the same resolved sha256 set there
+# is nothing to add, so the run stops. The set is read from that PR's own manifest, not from
+# its body: a body is markdown that can be truncated, the manifest is what would be identical.
+#
+# No push trigger on purpose: a bump branch pushing a new commit must not start another bump.
+
+on:
+  schedule:
+    - cron: '0 6 * * 3'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # uv syncs pytest and pyinfra from uv.lock, so there is no second dependency list to drift.
+      - uses: astral-sh/setup-uv@v6
+
+      # --dry-run exits 2 when a plugin is actionable, and --bump exits 2 when a plugin could not
+      # be resolved at all: both are normal here. 1 is not — that is what an uncaught exception
+      # returns, and it used to read as "nothing to bump" on a green run. `set +e` because a run
+      # step is `bash -e` by default, which would kill the step on that 2 before the exit code is
+      # read. The body is written before the bump, so it describes the change rather than the
+      # already-bumped manifest.
+      #
+      # The gate is run here because a PR opened with the repository GITHUB_TOKEN triggers no
+      # pull_request workflows: containers.yml — and the gate it runs — never sees this PR, so
+      # without this step the only automated PR author in the repo opens PRs with no checks at
+      # all. A bump the gate rejects fails the run instead of opening a PR.
+      - name: Resolve the pins, gate the result and write the PR body
+        run: |
+          set +e
+          git show HEAD:containers/images.json > "$RUNNER_TEMP/base.json"
+          uv run python scripts/resolve_plugins.py --dry-run > "$RUNNER_TEMP/pr-body.md"
+          rc=$?; case "$rc" in 0|2) ;; *) exit 1 ;; esac
+          uv run python scripts/resolve_plugins.py --bump
+          rc=$?; case "$rc" in 0|2) ;; *) exit 1 ;; esac
+          set -e
+          uv run python scripts/ci_gate.py --base "$RUNNER_TEMP/base.json" --head containers/images.json
+
+      - name: Push the bump branch and open the PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: bump/plugins-${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- containers/images.json; then
+            echo "Nothing to bump: every pin already resolves to its newest compatible release."
+            exit 0
+          fi
+
+          # No open bump PR (or none by this bot) reads as no duplicate. A search that errors is
+          # a plain command here, so `set -e` aborts the run instead of quietly opening a second
+          # PR. --limit: gh pr list truncates at 30.
+          opens=$(gh pr list --state open --limit 100 --search 'author:github-actions[bot]' \
+                    --json headRefName \
+                    --jq '.[] | select(.headRefName | startswith("bump/plugins-")) | .headRefName')
+          want=$(jq -S '[.[].plugins[]?.sha256] | sort' containers/images.json)
+          while read -r open; do
+            [ -n "$open" ] || continue
+            # A branch whose manifest cannot be read is not evidence of a duplicate, so it is
+            # skipped rather than blocking the run.
+            have=$(gh api "repos/${{ github.repository }}/contents/containers/images.json?ref=$open" \
+                     -H "Accept: application/vnd.github.raw" \
+                   | jq -S '[.[].plugins[]?.sha256] | sort' || true)
+            if [ "$have" = "$want" ]; then
+              echo "Skipping: $open already proposes these exact plugin artifacts."
+              exit 0
+            fi
+          done <<< "$opens"
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add containers/images.json
+          git commit -m "chore: bump plugin pins in containers/images.json"
+          git push origin "HEAD:refs/heads/$BRANCH"
+          gh pr create --base main --head "$BRANCH" \
+            --title "Weekly plugin bump $(date -u +%Y-%m-%d)" \
+            --body-file "$RUNNER_TEMP/pr-body.md"

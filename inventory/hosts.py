@@ -6,9 +6,9 @@ pve = ["pve"]
 
 game_nodes = [
     ("lobby", {"ssh_hostname": "10.10.10.54", "ssh_user": "core"}),
-    # ("plugins", {"ssh_hostname": "10.10.10.55", "ssh_user": "core"}),
+    ("plugins", {"ssh_hostname": "10.10.10.55", "ssh_user": "core"}),
     ("vanilla", {"ssh_hostname": "10.10.10.56", "ssh_user": "core"}),
-    # ("neoforge", {"ssh_hostname": "10.10.10.57", "ssh_user": "core"}),
+    ("neoforge", {"ssh_hostname": "10.10.10.57", "ssh_user": "core"}),
 ]
 
 ucore = [

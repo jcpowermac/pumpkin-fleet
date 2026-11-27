@@ -1,0 +1,97 @@
+{
+  "pagination": {
+    "count": 3
+  },
+  "result": [
+    {
+      "name": "5.12.4-SNAPSHOT+1137",
+      "createdAt": "2026-11-26T14:15:04.160336Z",
+      "channel": {
+        "name": "Snapshot"
+      },
+      "downloads": {
+        "PAPER": {
+          "downloadUrl": "https://hangarcdn.papermc.io/plugins/ViaVersion/ViaVersion/versions/5.12.4-SNAPSHOT%2B1137/PAPER/ViaVersion-5.12.4-SNAPSHOT.jar",
+          "fileInfo": {
+            "name": "ViaVersion-5.12.4-SNAPSHOT.jar",
+            "sha256Hash": "6a81709325fd4e08898cad0929e69d46b0327972a6cdbf45a1e7345c006c9eef"
+          }
+        }
+      },
+      "pluginDependencies": {
+        "PAPER": [
+          {
+            "name": "ViaBackwards",
+            "projectId": 12,
+            "required": false
+          },
+          {
+            "name": "ViaRewind",
+            "projectId": 112,
+            "required": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "5.12.4-SNAPSHOT+1136",
+      "createdAt": "2026-11-25T07:51:50.605506Z",
+      "channel": {
+        "name": "Snapshot"
+      },
+      "downloads": {
+        "PAPER": {
+          "downloadUrl": "https://hangarcdn.papermc.io/plugins/ViaVersion/ViaVersion/versions/5.12.4-SNAPSHOT%2B1136/PAPER/ViaVersion-5.12.4-SNAPSHOT.jar",
+          "fileInfo": {
+            "name": "ViaVersion-5.12.4-SNAPSHOT.jar",
+            "sha256Hash": "2ae20b8ad618c79d5575cb493e82d95f99a7d5a1bd2bee64a0e6c14e9cb382ae"
+          }
+        }
+      },
+      "pluginDependencies": {
+        "PAPER": [
+          {
+            "name": "ViaBackwards",
+            "projectId": 12,
+            "required": false
+          },
+          {
+            "name": "ViaRewind",
+            "projectId": 112,
+            "required": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "5.12.3",
+      "createdAt": "2026-11-24T18:49:32.89408Z",
+      "channel": {
+        "name": "Release"
+      },
+      "downloads": {
+        "PAPER": {
+          "downloadUrl": "https://hangarcdn.papermc.io/plugins/ViaVersion/ViaVersion/versions/5.12.3/PAPER/ViaVersion-5.12.3.jar",
+          "fileInfo": {
+            "name": "ViaVersion-5.12.3.jar",
+            "sha256Hash": "8dec6b62c7ec4f355e59175fc8eaeb825719ae8d308723617097dcaab7073531"
+          }
+        }
+      },
+      "pluginDependencies": {
+        "PAPER": [
+          {
+            "name": "ViaBackwards",
+            "projectId": 12,
+            "required": false
+          },
+          {
+            "name": "ViaRewind",
+            "projectId": 112,
+            "required": false
+          }
+        ]
+      }
+    }
+  ]
+}

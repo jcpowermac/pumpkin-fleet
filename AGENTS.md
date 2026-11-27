@@ -7,6 +7,13 @@ LXCs. Access: `ssh root@172.31.12.99` (key-based); `pct exec <vmid>` for LXCs,
 
 ## Read first
 
+- `docs/operations.md` — **the operator guide**: fleet table, infrastructure and state diagrams
+  (Mermaid), day-2 runbooks, command reference, what the tooling refuses to do. Start here for
+  anything that is a *how do I* question.
+- `docs/superpowers/specs/2026-11-26-fleet-plugin-gitops-design.md` — the current fleet design
+  (container images, `stable`/`stable-next` channels, the data zvol, the bump bot), with its plan
+  in `docs/superpowers/plans/2026-11-26-fleet-plugin-gitops.md`. Newer than `docs/plan.md` where
+  they disagree.
 - `docs/plan.md` — the deployment plan (checkbox-tracked, one task at a time).
 - `docs/spike-notes.md` — **everything learned the hard way**, organized as
   symptom-recognisable sections. Check it before fighting any infra problem.
@@ -16,7 +23,20 @@ LXCs. Access: `ssh root@172.31.12.99` (key-based); `pct exec <vmid>` for LXCs,
 
 **Ignore the legacy minecraft LXC fleet on pve3 (VMIDs 100-107: sr, velocity, usc,
 CMCS, pangolin, cmcs2, traefik, lobby) — they are the old LXD/LXC stack being
-replaced by this repo's uCore VMs (201-204) + LXC 150.**
+replaced by this repo's uCore VMs (201-204) + LXC 150.** **Do not touch them** (2026-11-26): no migration, no copies
+out of them, no stopping them — plan Task 8 is descoped. LXC 150 (authentik) is part of *this* fleet and stays in scope.
+
+**Minecraft data lives on a second disk** (2026-11-26): each game VM has `scsi0` = disposable OS disk and `scsi1` =
+host-owned ZFS volume `pool/mcdata/<node>`, attached as `/dev/zvol/...` so `qm destroy --purge` cannot delete it. Verified
+on pve3 with a throwaway VMID. See the fleet design doc §2b.
+
+## Scope note (2026-11-26): pumpkin is out
+
+**Pumpkin (the Rust server + PatchBukkit + the native OPanel cdylib) is no longer used in
+the fleet and is no longer in the tree.** `containers/images.json` holds the four server
+images (`papermc`, `fabric`, `velocity`, `neoforge`) and `tasks/gameserver.py` `WORKLOADS`
+maps `lobby -> papermc`. glibc is still required, but by `neoforge` (see
+`containers/README.md`).
 
 ## Gotchas that have already cost time
 

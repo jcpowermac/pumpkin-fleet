@@ -1,7 +1,13 @@
 # Fabric + OPanel container image
 
+> **SUPERSEDED by `2026-11-26-fleet-plugin-gitops-design.md`.** The image now lives in that
+> design's plugin manifest (`containers/images.json` with a shared `plugins` build stage), its
+> base is UBI 10 (`containers/fabric/Dockerfile`), and rule 5 is "the image owns the names it
+> ships" rather than "the volume always wins". Kept as the record of how the fabric image was
+> first built; do not follow it as instructions.
+
 Date: 2026-11-25
-Status: draft for approval
+Status: superseded
 Scope: `containers/fabric/` + an `images.json` entry. Originally image-only; on
 2026-11-25 the user asked for it provisioned too, so the `vanilla` node (203,
 `10.10.10.56`) now runs this image and `tasks/gameserver.py` grew the two fixes

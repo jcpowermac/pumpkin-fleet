@@ -1,29 +1,108 @@
 [
   {
-    "name": "pumpkin",
-    "version": "0.2.2-26.3-26.60",
-    "args": {
-      "PUMPKIN_RELEASE": "0.2.2%2B26.3-26.60",
-      "PUMPKIN_SHA256": "3755df414cdece664223388a93421c5c674682f5b9264387416b8a9074cd8d59",
-      "PATCHBUKKIT_VERSION": "0.2.2",
-      "PATCHBUKKIT_SHA256": "d4db46ed76d5f8c2306b225343f17ee60dc140ffb2fd412292d098bb8e9aacdf"
-    },
-    "plugins": {
-      "opanel": {
-        "version": "2.2.11",
-        "url": "https://worker.opanel.cn/download/2.2.11/opanel-pumpkin-x86_64-unknown-linux-gnu-build-2.2.11.so",
-        "sha256": "9b6f0d6cc2ff2ade96f53ef212d425377d25a89c9bc40e0556198d66d577881e",
-        "_note": "Native Pumpkin plugin (cdylib). Statically links Pumpkin's API, so it is VERSION-LOCKED to this entry's pumpkin version: bump both together or the server panics on load (see opanel.cn/docs/versions). Installed into the /data volume, not the image, so its 111 MB never ships in every layer."
-      }
-    }
-  },
-  {
     "name": "papermc",
-    "version": "26.3-258",
+    "version": "26.3-258-p2",
     "args": {
       "PAPER_VERSION": "26.3-258",
       "PAPER_SHA256": "c5df5fb9f6155e48380c67c6e2b2dc2581b7db1a4b665d2c3818057b7efb6692"
-    }
+    },
+    "plugins": [
+      {
+        "name": "LuckPerms",
+        "slug": "luckperms",
+        "source": "modrinth",
+        "mc": [
+          "26.3"
+        ],
+        "install_as": "LuckPerms.jar",
+        "version": "v5.5.71-bukkit",
+        "url": "https://cdn.modrinth.com/data/Vebnzrzj/versions/b0mk8uS6/LuckPerms-Bukkit-5.5.71.jar",
+        "sha256": "49cecb66fa1fd22a133039a490e9c1e5095a238e7cd66eb9d2a16fe6c897550d",
+        "deps": []
+      },
+      {
+        "name": "ViaVersion",
+        "slug": "viaversion",
+        "source": "hangar",
+        "mc": [
+          "26.3"
+        ],
+        "install_as": "ViaVersion.jar",
+        "version": "5.12.3",
+        "url": "https://hangarcdn.papermc.io/plugins/ViaVersion/ViaVersion/versions/5.12.3/PAPER/ViaVersion-5.12.3.jar",
+        "sha256": "8dec6b62c7ec4f355e59175fc8eaeb825719ae8d308723617097dcaab7073531",
+        "deps": [
+          {
+            "slug": "viabackwards",
+            "name": "ViaBackwards",
+            "required": false
+          },
+          {
+            "slug": "viarewind",
+            "name": "ViaRewind",
+            "required": false
+          }
+        ]
+      },
+      {
+        "name": "ViaBackwards",
+        "slug": "viabackwards",
+        "source": "hangar",
+        "mc": [
+          "26.3"
+        ],
+        "install_as": "ViaBackwards.jar",
+        "version": "5.12.3",
+        "url": "https://hangarcdn.papermc.io/plugins/ViaVersion/ViaBackwards/versions/5.12.3/PAPER/ViaBackwards-5.12.3.jar",
+        "sha256": "81a1ef49567f76ba4ad43f7489080bc580e3fcf3d9601b7e852820ed4b6cecc7",
+        "deps": [
+          {
+            "slug": "viarewind",
+            "name": "ViaRewind",
+            "required": false
+          },
+          {
+            "slug": "viaversion",
+            "name": "ViaVersion",
+            "required": true
+          }
+        ]
+      },
+      {
+        "name": "ViaRewind",
+        "slug": "viarewind",
+        "source": "hangar",
+        "mc": [
+          "26.3"
+        ],
+        "install_as": "ViaRewind.jar",
+        "version": "4.2.0",
+        "url": "https://hangarcdn.papermc.io/plugins/ViaVersion/ViaRewind/versions/4.2.0/PAPER/ViaRewind-4.2.0.jar",
+        "sha256": "f5113ea939353fec6170e6d1b7d2326fab76fa8d0cee594f689796995fc96720",
+        "deps": [
+          {
+            "slug": "viabackwards",
+            "name": "ViaBackwards",
+            "required": true
+          },
+          {
+            "slug": "viaversion",
+            "name": "ViaVersion",
+            "required": true
+          }
+        ]
+      }
+    ],
+    "excluded": [
+      {
+        "name": "EssentialsX",
+        "_note": "considered: no 26.3-compatible release yet"
+      },
+      {
+        "name": "Vault",
+        "_note": "considered: no scriptable source (SpigotMC download needs a session)"
+      }
+    ]
   },
   {
     "name": "neoforge",
@@ -31,7 +110,8 @@
     "args": {
       "NEOFORGE_VERSION": "26.3.0.115",
       "NEOFORGE_SHA256": "e451494c07ef7ba090f17e3c5debdc318237db29304a40ce10f7433284db6a2a"
-    }
+    },
+    "plugins": []
   },
   {
     "name": "velocity",
@@ -39,24 +119,59 @@
     "args": {
       "VELOCITY_VERSION": "4.3.1-45",
       "VELOCITY_SHA256": "0844bcabdcdb4f5b875906fd4c3365bc1bb76918e42bc595ed88ad195258dd75"
-    }
+    },
+    "plugins": []
   },
   {
     "name": "fabric",
-    "version": "26.3-0.20.1",
+    "version": "26.3-0.20.1-p1",
     "args": {
       "FABRIC_MC": "26.3",
-      "FABRIC_LOADER": "0.20.1",
-      "FABRIC_API": "0.167.0+26.3",
-      "OPANEL_VERSION": "2.2.11",
-      "OPANEL_ASSET": "opanel-fabric-26.1-build-2.2.11.jar"
+      "FABRIC_LOADER": "0.20.1"
     },
-    "plugins": {
-      "opanel": {
+    "plugins": [
+      {
+        "name": "fabric-api",
+        "slug": "FabricMC/fabric-api",
+        "source": "github",
+        "mc": [
+          "26.3"
+        ],
+        "install_as": "fabric-api.jar",
+        "version": "0.167.0+26.3",
+        "url": "https://github.com/FabricMC/fabric-api/releases/download/0.167.0%2B26.3/fabric-api-0.167.0%2B26.3.jar",
+        "sha256": "ec6c9dbd884d68ae071fdc96cbdd91f2a5256bf3085a3b457e475827b31cad19",
+        "deps": []
+      },
+      {
+        "name": "opanel",
+        "slug": "opanel-mc/opanel",
+        "source": "github",
+        "mc": [
+          "26.3"
+        ],
+        "install_as": "opanel-fabric.jar",
         "version": "2.2.11",
-        "bundled": true,
-        "_note": "Baked into the image and seeded into /data/mods by the entrypoint. Unlike pumpkin's native cdylib this is a plain mod jar, so it is not version-locked to the server build; it does need fabric-api, which the image also bundles."
+        "url": "https://github.com/opanel-mc/opanel/releases/download/2.2.11/opanel-fabric-26.1-build-2.2.11.jar",
+        "sha256": "d6cf3652986faafb5d277c22682da77c83a175c119973ece235ded8298032dd3",
+        "deps": [],
+        "note": "upstream ships no 26.3 fabric build; newest is opanel-fabric-26.1-build-2.2.11.jar (MC 26.1)",
+        "stale": true
+      },
+      {
+        "name": "LuckPerms",
+        "slug": "luckperms",
+        "source": "modrinth",
+        "mc": [
+          "26.3"
+        ],
+        "install_as": "LuckPerms.jar",
+        "version": "v5.5.85-fabric",
+        "url": "https://cdn.modrinth.com/data/Vebnzrzj/versions/DzQPkkXY/LuckPerms-Fabric-5.5.85.jar",
+        "sha256": "18598fcb95a83f6723d8bc68a905500ed5ecac92e9909ce1f25409cdebe2df49",
+        "deps": []
       }
-    }
+    ],
+    "_note": "Every plugin here is baked by the image's plugins stage, sha256-gated, and lands in /opt/bundled-mods under install_as; the entrypoint then installs or replaces them in /data/mods, because for a name this fleet ships the image is authoritative. Only a mod under a name the fleet does not ship is left alone."
   }
 ]

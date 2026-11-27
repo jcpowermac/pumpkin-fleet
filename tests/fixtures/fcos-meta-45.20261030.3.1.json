@@ -1,0 +1,22 @@
+{
+  "_note": "Recorded live 2026-11-26 from builds.coreos.fedoraproject.org/prod/streams/stable/builds/45.20261030.3.1/x86_64/meta.json, trimmed to the artifacts the fetch reads. `qemu` is kept so the parser is proved to pick `proxmoxve` rather than the first artifact.",
+  "buildid": "45.20261030.3.1",
+  "name": "fedora-coreos",
+  "images": {
+    "ostree": {
+      "path": "fedora-coreos-45.20261030.3.1-ostree.x86_64.tar",
+      "sha256": "d9cd6f58bfb2f547989d6ff2408bd3d24ffa1d6fe736a3217f0a0c6114995689"
+    },
+    "qemu": {
+      "path": "fedora-coreos-45.20261030.3.1-qemu.x86_64.qcow2.xz",
+      "sha256": "b104cbf4283a493b92ed82443f49ac4d998bcf5190c1523fb6568269803bbecf",
+      "size": 869954360
+    },
+    "proxmoxve": {
+      "path": "fedora-coreos-45.20261030.3.1-proxmoxve.x86_64.qcow2.xz",
+      "sha256": "afb24063a5464ce6b7edd7ac84440b408e40699886fbff9f01d2b8582a9f2dba",
+      "size": 870010004,
+      "uncompressed-sha256": "b785bcddec88aba0cd3ed473e366b3ff61517af8d66d3ad3a0dac3afda84d6c5"
+    }
+  }
+}

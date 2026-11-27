@@ -70,10 +70,14 @@ storage:
           echo "fleet-provision: $(/usr/bin/ip -4 addr show $IFACE | grep inet)"
 
           # Idempotent guard. Without it this unit rebases + reboots on every boot, forever:
-          # after the first run uCore is the booted deployment, the rebase becomes a no-op, and
-          # the unconditional reboot turns the node into a reboot loop with no network.
-          if /usr/bin/rpm-ostree status --booted 2>/dev/null | grep -q 'ublue-os/ucore'; then
-            echo "fleet-provision: already running uCore — network set, nothing else to do"
+          # after the first run the target image is the booted deployment, the rebase becomes a
+          # no-op, and the unconditional reboot turns the node into a reboot loop with no
+          # network. It greps the image the render targets (spike-notes §14: a node booted on
+          # ghcr.io/jcpowermac/pumpkin-os does not match a hardcoded 'ublue-os/ucore' grep).
+          # shortcut: image, not tag — moving a booted node between tags/digests is the update
+          # path (rebase by @sha256), not first-boot Ignition.
+          if /usr/bin/rpm-ostree status --booted 2>/dev/null | grep -q "${UCORE_IMAGE}"; then
+            echo "fleet-provision: already running ${UCORE_IMAGE} — network set, nothing else to do"
             # uCore-only services cannot be enabled before the rebase; do it here.
             # cockpit-ws is a Podman container in uCore (the RPM is deliberately absent),
             # and cockpit-files gives the ops class its file manager.
@@ -101,9 +105,9 @@ storage:
           up=""
           for i in $(seq 1 36); do /usr/bin/curl -sS --max-time 10 -o /dev/null https://ghcr.io/v2/ >/dev/null 2>&1 && up=1 && break; sleep 10; done
           [ -n "$up" ] || { echo "fleet-provision: no ghcr.io egress"; exit 1; }
-          echo "fleet-provision: rebasing to uCore (pull ~10min)"
+          echo "fleet-provision: rebasing to ${UCORE_IMAGE}:${UCORE_TAG} (pull ~10min)"
           # --bypass-driver: updates are owned by Zincati on stock FCOS
-          /usr/bin/rpm-ostree rebase --bypass-driver ostree-unverified-registry:ghcr.io/ublue-os/${UCORE_IMAGE}:${UCORE_TAG} || exit 1
+          /usr/bin/rpm-ostree rebase --bypass-driver ostree-unverified-registry:${UCORE_IMAGE}:${UCORE_TAG} || exit 1
           echo "fleet-provision: staged; rebooting into uCore"
           /usr/bin/systemctl reboot
 
